@@ -3,6 +3,18 @@ plugins {
     alias(libs.plugins.compose.compiler)
 }
 
+val localProperties = mutableMapOf<String, String>()
+val localFile = rootProject.file("local.properties")
+if (localFile.exists()) {
+    localFile.readLines().forEach { line ->
+        val parts = line.split("=", limit = 2)
+        if (parts.size == 2) {
+            localProperties[parts[0].trim()] = parts[1].trim()
+        }
+    }
+}
+val stadiaApiKey = localProperties["STADIA_MAPS_API_KEY"] ?: ""
+
 android {
     namespace = "com.cpobaid.retrocardash"
     compileSdk = 37
@@ -15,6 +27,7 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField("String", "STADIA_MAPS_API_KEY", "\"$stadiaApiKey\"")
     }
 
     buildTypes {
@@ -28,6 +41,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 

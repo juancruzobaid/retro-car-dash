@@ -19,6 +19,7 @@
             android:name=".MainActivity"
             android:exported="true"
             android:screenOrientation="landscape"
+            android:windowSoftInputMode="adjustResize|stateHidden"
             android:theme="@style/Theme.RetroCarDash">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
