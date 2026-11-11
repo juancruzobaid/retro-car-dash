@@ -2,16 +2,21 @@ package com.cpobaid.retrocardash
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.Activity
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.os.Bundle
+import android.speech.RecognizerIntent
+import android.speech.tts.TextToSpeech
 import android.util.Log
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -21,17 +26,27 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeOff
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.Flag
+import androidx.compose.material.icons.filled.Navigation
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Straight
+import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.TurnLeft
+import androidx.compose.material.icons.filled.TurnRight
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -73,6 +88,9 @@ import org.maplibre.geojson.Point
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 object DashColors {
     val ACCENT = androidx.compose.ui.graphics.Color(0xFFE60000)
@@ -151,11 +169,21 @@ data class SearchResult(val displayName: String, val lat: Double, val lon: Doubl
 
 data class SearchResponse(val results: List<SearchResult>, val error: String?)
 
+data class ManeuverPoint(
+    val instruction: String,
+    val lat: Double,
+    val lon: Double,
+    val distanceToNextMeters: Double,
+    val type: Int,
+    val beginShapeIndex: Int
+)
+
 data class RouteResult(
     val geometry: List<LatLng>,
     val distanceKm: Double,
     val durationSeconds: Int,
-    val instructions: List<String>
+    val instructions: List<String>,
+    val maneuvers: List<ManeuverPoint>
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -175,6 +203,7 @@ fun MapScreen(modifier: Modifier = Modifier) {
     }
 
     var isChaseView by remember { mutableStateOf(true) }
+    var initialChaseApplied by remember { mutableStateOf(false) }
     var currentSpeedKmh by remember { mutableIntStateOf(0) }
     var currentStreetName by remember { mutableStateOf<String?>(null) }
     var mapLibreMapInstance by remember { mutableStateOf<MapLibreMap?>(null) }
@@ -186,6 +215,13 @@ fun MapScreen(modifier: Modifier = Modifier) {
     var routeDistance by remember { mutableStateOf(0.0) } // km
     var routeDuration by remember { mutableStateOf(0) } // minutes
     var routeInstructions by remember { mutableStateOf<List<String>>(emptyList()) }
+    var routeManeuvers by remember { mutableStateOf<List<ManeuverPoint>>(emptyList()) }
+    var nextManeuverIndex by remember { mutableIntStateOf(0) }
+    var nextManeuverDistance by remember { mutableIntStateOf(0) }
+    var ttsEnabled by remember { mutableStateOf(true) }
+    val spokenManeuvers = remember { mutableSetOf<String>() }
+    val tts = remember { mutableStateOf<TextToSpeech?>(null) }
+
     var isSearching by remember { mutableStateOf(false) }
     var showSearchSheet by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
@@ -198,9 +234,54 @@ fun MapScreen(modifier: Modifier = Modifier) {
         hasLocationPermission = isGranted
     }
 
+    val speechLauncher = rememberLauncherForActivityResult(
+        contract = StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val results = result.data?.getStringArrayListExtra(
+                RecognizerIntent.EXTRA_RESULTS
+            )
+            results?.firstOrNull()?.let { text ->
+                searchQuery = text
+            }
+        }
+    }
+
     LaunchedEffect(Unit) {
         if (!hasLocationPermission) {
             permissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+    }
+
+    // Initialize TTS
+    DisposableEffect(Unit) {
+        val ttsInstance = TextToSpeech(context) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                tts.value?.language = Locale.forLanguageTag("es-AR")
+            }
+        }
+        tts.value = ttsInstance
+        onDispose {
+            ttsInstance.stop()
+            ttsInstance.shutdown()
+        }
+    }
+
+    // Apply Chase View on first GPS fix at startup
+    LaunchedEffect(mapLibreMapInstance) {
+        while (!initialChaseApplied) {
+            val map = mapLibreMapInstance
+            if (map != null &&
+                map.locationComponent.isLocationComponentActivated
+            ) {
+                val location = map.locationComponent.lastKnownLocation
+                if (location != null) {
+                    isChaseView = true
+                    applyChaseView(map, context, routeGeometry.isNotEmpty())
+                    initialChaseApplied = true
+                }
+            }
+            delay(500L)
         }
     }
 
@@ -291,6 +372,127 @@ fun MapScreen(modifier: Modifier = Modifier) {
         }
     }
 
+    // Voice turn-by-turn announcement loop
+    LaunchedEffect(mapLibreMapInstance) {
+        while (true) {
+            try {
+                val map = mapLibreMapInstance
+                if (map != null &&
+                    map.locationComponent.isLocationComponentActivated &&
+                    ttsEnabled &&
+                    routeManeuvers.isNotEmpty()
+                ) {
+                    val location = map.locationComponent.lastKnownLocation
+                    if (location != null) {
+                        routeManeuvers.forEach { maneuver ->
+                            val distanceMeters = haversineMeters(
+                                location.latitude, location.longitude,
+                                maneuver.lat, maneuver.lon
+                            )
+                            val id250 = "${maneuver.instruction}_250"
+                            val id50 = "${maneuver.instruction}_50"
+
+                            if (distanceMeters in 200.0..300.0 && !spokenManeuvers.contains(id250)) {
+                                val roundedDist = (distanceMeters / 50.0).toInt() * 50
+                                tts.value?.speak(
+                                    "En $roundedDist metros, ${maneuver.instruction}",
+                                    TextToSpeech.QUEUE_FLUSH, null, id250
+                                )
+                                spokenManeuvers.add(id250)
+                            }
+                            if (distanceMeters < 50.0 && !spokenManeuvers.contains(id50)) {
+                                tts.value?.speak(
+                                    maneuver.instruction,
+                                    TextToSpeech.QUEUE_FLUSH, null, id50
+                                )
+                                spokenManeuvers.add(id50)
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("RetroCarDash", "TTS loop error", e)
+            }
+            delay(2000L)
+        }
+    }
+
+    // LaunchedEffect for distance to next maneuver
+    LaunchedEffect(mapLibreMapInstance) {
+        while (true) {
+            try {
+                val map = mapLibreMapInstance
+                if (map != null &&
+                    map.locationComponent.isLocationComponentActivated &&
+                    routeManeuvers.isNotEmpty() &&
+                    routeGeometry.isNotEmpty()
+                ) {
+                    val location = map.locationComponent.lastKnownLocation
+                    if (location != null) {
+                        var closestShapeIdx = 0
+                        var closestDist = Double.MAX_VALUE
+                        routeGeometry.forEachIndexed { idx, point ->
+                            val d = haversineMeters(
+                                location.latitude, location.longitude,
+                                point.latitude, point.longitude
+                            )
+                            if (d < closestDist) {
+                                closestDist = d
+                                closestShapeIdx = idx
+                            }
+                        }
+
+                        val upcomingIdx = routeManeuvers.indexOfFirst { m ->
+                            m.beginShapeIndex > closestShapeIdx &&
+                            m.type !in listOf(1, 2, 3)
+                        }
+
+                        if (upcomingIdx >= 0) {
+                            nextManeuverIndex = upcomingIdx
+                            val upcoming = routeManeuvers[upcomingIdx]
+                            nextManeuverDistance = haversineMeters(
+                                location.latitude, location.longitude,
+                                upcoming.lat, upcoming.lon
+                            ).toInt()
+                        } else {
+                            val destIdx = routeManeuvers.indexOfLast {
+                                it.type in listOf(4, 5, 6)
+                            }
+                            if (destIdx >= 0) {
+                                nextManeuverIndex = destIdx
+                                nextManeuverDistance = haversineMeters(
+                                    location.latitude, location.longitude,
+                                    routeManeuvers[destIdx].lat,
+                                    routeManeuvers[destIdx].lon
+                                ).toInt()
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("RetroCarDash", "Next maneuver loop error", e)
+            }
+            delay(500L)
+        }
+    }
+
+    // Unified LaunchedEffect for map padding relative to visible area
+    LaunchedEffect(isChaseView, routeGeometry.isNotEmpty(), mapLibreMapInstance) {
+        val map = mapLibreMapInstance ?: return@LaunchedEffect
+        val displayMetrics = context.resources.displayMetrics
+        val screenHeightPx = displayMetrics.heightPixels
+        val barHeightPx = if (routeGeometry.isNotEmpty())
+            (96 * displayMetrics.density).toInt()
+            else (48 * displayMetrics.density).toInt()
+        val visibleHeightPx = screenHeightPx - barHeightPx
+
+        val topPaddingPx = if (isChaseView)
+            (0.6 * visibleHeightPx).toInt()
+            else 0
+
+        map.setPadding(0, topPaddingPx, 0, barHeightPx)
+    }
+
     // Reverse geocode current street every 3 seconds
     LaunchedEffect(mapLibreMapInstance) {
         val map = mapLibreMapInstance
@@ -343,9 +545,6 @@ fun MapScreen(modifier: Modifier = Modifier) {
                         val zoom = if (isChaseView) 18.0 else 16.0
                         mapLibreMap.moveCamera(CameraUpdateFactory.zoomTo(zoom))
                     }
-                    val displayMetrics = context.resources.displayMetrics
-                    val topPaddingPx = (displayMetrics.heightPixels * 0.30).toInt()
-                    mapLibreMap.setPadding(0, topPaddingPx, 0, 0)
                 }
             }
         }
@@ -395,13 +594,8 @@ fun MapScreen(modifier: Modifier = Modifier) {
                             .zoom(13.0)
                             .build()
 
-                        // Apply map padding using DisplayMetrics (30% from top, shifting center down)
-                        val displayMetrics = context.resources.displayMetrics
-                        val topPaddingPx = (displayMetrics.heightPixels * 0.30).toInt()
-                        mapLibreMap.setPadding(0, topPaddingPx, 0, 0)
-
                         val matchedSymbolLayers = mutableListOf<SymbolLayer>()
-                        // Customize map style layers for in-car navigation
+                        // Customize map style layers for in-car navigation as floating signs over roads
                         for (layer in style.layers) {
                             val id = layer.id.lowercase()
                             if (layer is LineLayer) {
@@ -424,7 +618,11 @@ fun MapScreen(modifier: Modifier = Modifier) {
                                     layer.setProperties(
                                         PropertyFactory.textColor(Color.parseColor(DashColors.ACCENT_HEX)),
                                         PropertyFactory.textHaloColor(Color.parseColor("#000000")),
-                                        PropertyFactory.textHaloWidth(2.0f),
+                                        PropertyFactory.textHaloWidth(4.0f),
+                                        PropertyFactory.textHaloBlur(1.0f),
+                                        PropertyFactory.symbolPlacement(Property.SYMBOL_PLACEMENT_LINE_CENTER),
+                                        PropertyFactory.textPitchAlignment(Property.TEXT_PITCH_ALIGNMENT_VIEWPORT),
+                                        PropertyFactory.textRotationAlignment(Property.TEXT_ROTATION_ALIGNMENT_VIEWPORT),
                                         PropertyFactory.textSize(
                                             Expression.interpolate(
                                                 Expression.linear(),
@@ -454,175 +652,274 @@ fun MapScreen(modifier: Modifier = Modifier) {
                             override fun onMoveEnd(detector: MoveGestureDetector) {}
                         })
 
+                        // Add map click listener to toggle camera mode (Chase vs God View)
+                        mapLibreMap.addOnMapClickListener { _ ->
+                            if (mapLibreMap.locationComponent.isLocationComponentActivated) {
+                                isChaseView = !isChaseView
+                                mapLibreMap.locationComponent.cameraMode =
+                                    if (isChaseView) CameraMode.TRACKING_GPS else CameraMode.TRACKING
+
+                                // Apply padding synchronously so animateCamera uses the new value
+                                val displayMetrics = context.resources.displayMetrics
+                                val screenHeightPx = displayMetrics.heightPixels
+                                val barHeightPx = if (routeGeometry.isNotEmpty())
+                                    (96 * displayMetrics.density).toInt()
+                                    else (48 * displayMetrics.density).toInt()
+                                val visibleHeightPx = screenHeightPx - barHeightPx
+                                val topPaddingPx = if (isChaseView)
+                                    (0.6 * visibleHeightPx).toInt()
+                                    else 0
+                                mapLibreMap.setPadding(0, topPaddingPx, 0, barHeightPx)
+
+                                val location = mapLibreMap.locationComponent.lastKnownLocation
+                                val target = if (location != null)
+                                    LatLng(location.latitude, location.longitude)
+                                    else mapLibreMap.cameraPosition.target
+                                val bearing = if (isChaseView && location != null && location.hasBearing())
+                                    location.bearing.toDouble() else 0.0
+                                val tilt = if (isChaseView) 60.0 else 0.0
+                                val zoom = if (isChaseView) 18.0 else 16.0
+
+                                val cameraPosition = CameraPosition.Builder()
+                                    .target(target).zoom(zoom).tilt(tilt).bearing(bearing).build()
+                                mapLibreMap.animateCamera(
+                                    CameraUpdateFactory.newCameraPosition(cameraPosition), 1000
+                                )
+                            }
+                            true
+                        }
+
                         if (hasLocationPermission) {
                             enableLocation(context, mapLibreMap, style, isChaseView)
-                            mapLibreMap.setPadding(0, topPaddingPx, 0, 0)
                         }
                     }
                 }
             }
         )
 
-        // Recenter Button in top-left corner (toggles God View vs Chase View)
-        FloatingActionButton(
-            onClick = {
-                mapLibreMapInstance?.let { map ->
-                    val displayMetrics = context.resources.displayMetrics
-                    val topPaddingPx = (displayMetrics.heightPixels * 0.30).toInt()
-                    map.setPadding(0, topPaddingPx, 0, 0)
-
-                    if (map.locationComponent.isLocationComponentActivated) {
-                        isChaseView = !isChaseView
-                        map.locationComponent.cameraMode = if (isChaseView) CameraMode.TRACKING_GPS else CameraMode.TRACKING
-
-                        val location = map.locationComponent.lastKnownLocation
-                        val target = if (location != null) {
-                            LatLng(location.latitude, location.longitude)
-                        } else {
-                            map.cameraPosition.target
-                        }
-                        val bearing = if (isChaseView && location != null && location.hasBearing()) {
-                            location.bearing.toDouble()
-                        } else {
-                            0.0
-                        }
-                        val tilt = if (isChaseView) 60.0 else 0.0
-                        val zoom = if (isChaseView) 18.0 else 16.0
-
-                        val cameraPosition = CameraPosition.Builder()
-                            .target(target)
-                            .zoom(zoom)
-                            .tilt(tilt)
-                            .bearing(bearing)
-                            .build()
-
-                        map.animateCamera(CameraUpdateFactory.newCameraPosition(cameraPosition), 1000)
-                    } else if (hasLocationPermission) {
-                        map.style?.let { style ->
-                            isChaseView = !isChaseView
-                            enableLocation(context, map, style, isChaseView)
-                            map.setPadding(0, topPaddingPx, 0, 0)
-                        }
-                    }
-                }
-            },
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .padding(16.dp)
-                .size(56.dp),
-            shape = CircleShape,
-            containerColor = DashColors.ACCENT,
-            elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 4.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Filled.MyLocation,
-                contentDescription = "Toggle View Mode",
-                tint = androidx.compose.ui.graphics.Color.Black
-            )
-        }
-
-        // Destination Search Button in top-left corner, below recenter button (spaced 80dp down)
-        FloatingActionButton(
-            onClick = { showSearchSheet = true },
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .padding(start = 16.dp, top = 88.dp)
-                .size(56.dp),
-            shape = CircleShape,
-            containerColor = DashColors.ACCENT,
-            elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 4.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Filled.Search,
-                contentDescription = "Search Destination",
-                tint = androidx.compose.ui.graphics.Color.Black
-            )
-        }
-
-        // Speed Display in bottom-left corner
-        SpeedDisplay(
-            speedKmh = currentSpeedKmh,
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .padding(16.dp)
-        )
-
-        // Current Street Display at bottom-center
-        CurrentStreetDisplay(
-            streetName = currentStreetName,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 16.dp)
-        )
-
-        // Route Info & Turn-by-Turn Instructions at top-center
-        if (routeGeometry.isNotEmpty()) {
-            Column(
+        // Unified Bottom Panel (conditional structure based on active route)
+        if (routeGeometry.isNotEmpty() && nextManeuverIndex < routeManeuvers.size) {
+            // ====================================================
+            // ACTIVE ROUTE: 96dp panel, 50/50 split, no dividers
+            // ====================================================
+            val maneuver = routeManeuvers[nextManeuverIndex]
+            Row(
                 modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = 16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .height(96.dp)
+                    .background(androidx.compose.ui.graphics.Color.Black),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                // ETA & Distance Box
-                Box(
-                    modifier = Modifier
-                        .background(
-                            color = androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.8f),
-                            shape = RoundedCornerShape(12.dp)
-                        )
-                        .padding(horizontal = 20.dp, vertical = 10.dp),
-                    contentAlignment = Alignment.Center
+                // LEFT 50%: maneuver icon + distance + instruction
+                Row(
+                    modifier = Modifier.weight(0.5f).fillMaxHeight(),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    Column(
+                        modifier = Modifier
+                            .width(96.dp)
+                            .fillMaxHeight()
+                            .padding(vertical = 6.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
+                        Icon(
+                            imageVector = maneuverIcon(maneuver.type),
+                            contentDescription = null,
+                            tint = DashColors.ACCENT,
+                            modifier = Modifier.weight(0.75f).fillMaxWidth()
+                        )
                         Text(
-                            text = "$routeDuration min · ${String.format(java.util.Locale.getDefault(), "%.1f", routeDistance)} km",
+                            text = "A ${nextManeuverDistance}m",
                             color = DashColors.ACCENT,
-                            fontSize = 18.sp,
+                            fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace,
-                            textAlign = TextAlign.Center
+                            modifier = Modifier.weight(0.25f).wrapContentHeight()
                         )
-                        IconButton(
-                            onClick = {
-                                routeGeometry = emptyList()
-                                destination = null
-                                routeInstructions = emptyList()
-                            },
-                            modifier = Modifier.size(36.dp)
+                    }
+                    Box(
+                        modifier = Modifier.weight(1f).fillMaxHeight()
+                            .padding(horizontal = 12.dp),
+                        contentAlignment = Alignment.CenterStart
+                    ) {
+                        Text(
+                            text = maneuver.instruction.trimEnd('.', ' '),
+                            color = DashColors.ACCENT,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            lineHeight = 26.sp
+                        )
+                    }
+                }
+
+                // RIGHT 50%: top line (route info + cancel X),
+                //           bottom line (street centered + volume)
+                Column(
+                    modifier = Modifier.weight(0.5f).fillMaxHeight()
+                ) {
+                    // TOP LINE: route info centered + Cancel X on far right
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .padding(start = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        val arrivalTimeMillis = System.currentTimeMillis() +
+                            routeDuration * 60 * 1000L
+                        val arrivalTimeStr = SimpleDateFormat(
+                            "HH:mm", Locale.getDefault()
+                        ).format(Date(arrivalTimeMillis))
+                        Text(
+                            text = "$arrivalTimeStr · $routeDuration min · ${String.format(Locale.getDefault(), "%.1f", routeDistance)} km",
+                            color = DashColors.ACCENT,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .width(64.dp)
+                                .clickable {
+                                    routeGeometry = emptyList()
+                                    destination = null
+                                    routeInstructions = emptyList()
+                                    routeManeuvers = emptyList()
+                                    nextManeuverIndex = 0
+                                    nextManeuverDistance = 0
+                                    spokenManeuvers.clear()
+                                },
+                            contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Filled.Close,
                                 contentDescription = "Cancel Route",
                                 tint = DashColors.ACCENT,
-                                modifier = Modifier.size(24.dp)
+                                modifier = Modifier.size(28.dp)
+                            )
+                        }
+                    }
+                    // BOTTOM LINE: street name centered + Volume on far right
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .padding(start = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (currentStreetName.isNullOrBlank()) ""
+                                   else "Por $currentStreetName",
+                            color = DashColors.ACCENT,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .width(64.dp)
+                                .clickable { ttsEnabled = !ttsEnabled },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = if (ttsEnabled) Icons.AutoMirrored.Filled.VolumeUp
+                                             else Icons.AutoMirrored.Filled.VolumeOff,
+                                contentDescription = if (ttsEnabled) "Silenciar"
+                                                    else "Activar voz",
+                                tint = DashColors.ACCENT,
+                                modifier = Modifier.size(32.dp)
                             )
                         }
                     }
                 }
-
-                // Next Maneuver Instruction Box
-                val nextInstruction = routeInstructions.firstOrNull()
-                if (!nextInstruction.isNullOrBlank()) {
-                    Spacer(modifier = Modifier.height(8.dp))
+            }
+        } else {
+            // ====================================================
+            // NO ROUTE: single 48dp line, 50/50 split, no dividers
+            // ====================================================
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .background(androidx.compose.ui.graphics.Color.Black),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // LEFT 50%: "Destino 🔍" clickable
+                Row(
+                    modifier = Modifier
+                        .weight(0.5f)
+                        .fillMaxHeight()
+                        .clickable { showSearchSheet = true },
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Destino",
+                        color = DashColors.ACCENT,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Icon(
+                        imageVector = Icons.Filled.Search,
+                        contentDescription = "Search Destination",
+                        tint = DashColors.ACCENT,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+                // RIGHT 50%: street (centered) + volume (far right, 64dp box)
+                Row(
+                    modifier = Modifier
+                        .weight(0.5f)
+                        .fillMaxHeight()
+                        .padding(start = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Box(
-                        modifier = Modifier
-                            .background(
-                                color = androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.8f),
-                                shape = RoundedCornerShape(12.dp)
-                            )
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        modifier = Modifier.weight(1f),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = nextInstruction,
+                            text = if (currentStreetName.isNullOrBlank()) ""
+                                   else "Por $currentStreetName",
                             color = DashColors.ACCENT,
-                            fontSize = 16.sp,
+                            fontSize = 18.sp,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace,
-                            textAlign = TextAlign.Center
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .width(64.dp)
+                            .clickable { ttsEnabled = !ttsEnabled },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = if (ttsEnabled) Icons.AutoMirrored.Filled.VolumeUp
+                                         else Icons.AutoMirrored.Filled.VolumeOff,
+                            contentDescription = if (ttsEnabled) "Silenciar"
+                                                else "Activar voz",
+                            tint = DashColors.ACCENT,
+                            modifier = Modifier.size(32.dp)
                         )
                     }
                 }
@@ -715,6 +1012,15 @@ fun MapScreen(modifier: Modifier = Modifier) {
                                                             routeDistance = route.distanceKm
                                                             routeDuration = route.durationSeconds / 60
                                                             routeInstructions = route.instructions
+                                                            routeManeuvers = route.maneuvers
+                                                            nextManeuverIndex = 0
+                                                            nextManeuverDistance = 0
+                                                            spokenManeuvers.clear()
+
+                                                            isChaseView = true
+                                                            mapLibreMapInstance?.let { m ->
+                                                                applyChaseView(m, context, hasRoute = true)
+                                                            }
                                                         }
                                                     }
                                                 }
@@ -739,7 +1045,7 @@ fun MapScreen(modifier: Modifier = Modifier) {
 
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    // Custom keyboard
+                    // Custom keyboard with speech recognition input
                     CustomKeyboard(
                         onKeyPress = { key -> searchQuery += key },
                         onBackspace = {
@@ -747,8 +1053,23 @@ fun MapScreen(modifier: Modifier = Modifier) {
                                 searchQuery = searchQuery.dropLast(1)
                         },
                         onSpace = { searchQuery += " " },
-                        onSearch = {
-                            // Search already happens automatically via LaunchedEffect
+                        onMic = {
+                            try {
+                                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                                    putExtra(
+                                        RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                                        RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+                                    )
+                                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, "es-AR")
+                                    putExtra(
+                                        RecognizerIntent.EXTRA_PROMPT,
+                                        "Decí la dirección"
+                                    )
+                                }
+                                speechLauncher.launch(intent)
+                            } catch (e: Exception) {
+                                Log.e("RetroCarDash", "Speech recognition not available", e)
+                            }
                         }
                     )
                 }
@@ -757,63 +1078,41 @@ fun MapScreen(modifier: Modifier = Modifier) {
     }
 }
 
-@Composable
-fun SpeedDisplay(speedKmh: Int, modifier: Modifier = Modifier) {
-    Box(
-        modifier = modifier
-            .widthIn(min = 100.dp)
-            .background(
-                color = androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.6f),
-                shape = RoundedCornerShape(12.dp)
-            )
-            .padding(horizontal = 18.dp, vertical = 12.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                text = speedKmh.toString(),
-                color = DashColors.ACCENT,
-                fontSize = 72.sp,
-                fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace,
-                textAlign = TextAlign.Center
-            )
-            Text(
-                text = "km/h",
-                color = DashColors.ACCENT,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace,
-                textAlign = TextAlign.Center
-            )
-        }
-    }
-}
+@SuppressLint("MissingPermission")
+private fun applyChaseView(
+    mapLibreMap: MapLibreMap,
+    context: Context,
+    hasRoute: Boolean
+) {
+    if (!mapLibreMap.locationComponent.isLocationComponentActivated) return
 
-@Composable
-fun CurrentStreetDisplay(streetName: String?, modifier: Modifier = Modifier) {
-    if (!streetName.isNullOrBlank()) {
-        Box(
-            modifier = modifier
-                .background(
-                    color = androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.6f),
-                    shape = RoundedCornerShape(12.dp)
-                )
-                .padding(horizontal = 20.dp, vertical = 10.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = "Por $streetName",
-                color = DashColors.ACCENT,
-                fontSize = 24.sp,
-                fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace,
-                textAlign = TextAlign.Center
-            )
-        }
-    }
+    mapLibreMap.locationComponent.cameraMode = CameraMode.TRACKING_GPS
+
+    val displayMetrics = context.resources.displayMetrics
+    val screenHeightPx = displayMetrics.heightPixels
+    val barHeightPx = if (hasRoute)
+        (96 * displayMetrics.density).toInt()
+        else (48 * displayMetrics.density).toInt()
+    val visibleHeightPx = screenHeightPx - barHeightPx
+    val topPaddingPx = (0.6 * visibleHeightPx).toInt()
+    mapLibreMap.setPadding(0, topPaddingPx, 0, barHeightPx)
+
+    val location = mapLibreMap.locationComponent.lastKnownLocation
+    val target = if (location != null)
+        LatLng(location.latitude, location.longitude)
+        else mapLibreMap.cameraPosition.target
+    val bearing = if (location != null && location.hasBearing())
+        location.bearing.toDouble() else 0.0
+
+    val cameraPosition = CameraPosition.Builder()
+        .target(target)
+        .zoom(18.0)
+        .tilt(60.0)
+        .bearing(bearing)
+        .build()
+    mapLibreMap.animateCamera(
+        CameraUpdateFactory.newCameraPosition(cameraPosition), 1000
+    )
 }
 
 private suspend fun searchPlaces(
@@ -953,18 +1252,35 @@ private suspend fun fetchRoute(
                         val geometry = decodePolyline(shape, 1e6)
 
                         val instructions = mutableListOf<String>()
+                        val maneuverPoints = mutableListOf<ManeuverPoint>()
                         if (leg.has("maneuvers")) {
                             val maneuvers = leg.getJSONArray("maneuvers")
                             for (i in 0 until maneuvers.length()) {
                                 val maneuver = maneuvers.getJSONObject(i)
                                 val instruction = maneuver.optString("instruction", "")
+                                val beginShapeIndex = maneuver.optInt("begin_shape_index", -1)
+                                val lengthManeuver = maneuver.optDouble("length", 0.0) // km to next maneuver
+                                val type = maneuver.optInt("type", 0)
                                 if (instruction.isNotBlank()) {
                                     instructions.add(instruction)
+                                    if (beginShapeIndex >= 0 && beginShapeIndex < geometry.size) {
+                                        val point = geometry[beginShapeIndex]
+                                        maneuverPoints.add(
+                                            ManeuverPoint(
+                                                instruction = instruction,
+                                                lat = point.latitude,
+                                                lon = point.longitude,
+                                                distanceToNextMeters = lengthManeuver * 1000.0,
+                                                type = type,
+                                                beginShapeIndex = beginShapeIndex
+                                            )
+                                        )
+                                    }
                                 }
                             }
                         }
 
-                        return@withContext RouteResult(geometry, length, time, instructions)
+                        return@withContext RouteResult(geometry, length, time, instructions, maneuverPoints)
                     }
                 }
             }
@@ -1009,6 +1325,34 @@ private fun decodePolyline(encoded: String, precision: Double = 1e6): List<LatLn
         poly.add(p)
     }
     return poly
+}
+
+private fun maneuverIcon(type: Int): ImageVector = when (type) {
+    1, 7, 8, 17, 22 -> Icons.Filled.Straight
+    2, 9 -> Icons.Filled.Navigation
+    3, 16 -> Icons.Filled.Navigation
+    10 -> Icons.Filled.TurnRight
+    15 -> Icons.Filled.TurnLeft
+    11 -> Icons.Filled.TurnRight
+    14 -> Icons.Filled.TurnLeft
+    12, 13 -> Icons.Filled.Refresh
+    18, 20, 23 -> Icons.Filled.TurnRight
+    19, 21, 24 -> Icons.Filled.TurnLeft
+    25 -> Icons.Filled.SwapHoriz
+    26, 27 -> Icons.Filled.Refresh
+    4, 5, 6 -> Icons.Filled.Flag
+    else -> Icons.Filled.Straight
+}
+
+private fun haversineMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+    val R = 6371000.0
+    val dLat = Math.toRadians(lat2 - lat1)
+    val dLon = Math.toRadians(lon2 - lon1)
+    val a = Math.sin(dLat / 2).let { it * it } +
+            Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) *
+            Math.sin(dLon / 2).let { it * it }
+    val c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+    return R * c
 }
 
 private suspend fun fetchCurrentStreet(lat: Double, lon: Double): String? {
@@ -1074,11 +1418,6 @@ private fun enableLocation(
         locationComponent.cameraMode = if (isChaseView) CameraMode.TRACKING_GPS else CameraMode.TRACKING
         locationComponent.renderMode = RenderMode.COMPASS
 
-        // Apply display metrics padding right before animating camera
-        val displayMetrics = context.resources.displayMetrics
-        val topPaddingPx = (displayMetrics.heightPixels * 0.30).toInt()
-        mapLibreMap.setPadding(0, topPaddingPx, 0, 0)
-
         val zoom = if (isChaseView) 18.0 else 16.0
         val tilt = if (isChaseView) 60.0 else 0.0
         val location = locationComponent.lastKnownLocation
@@ -1127,7 +1466,7 @@ fun CustomKeyboard(
     onKeyPress: (String) -> Unit,
     onBackspace: () -> Unit,
     onSpace: () -> Unit,
-    onSearch: () -> Unit,
+    onMic: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val rows = listOf(
@@ -1158,32 +1497,31 @@ fun CustomKeyboard(
                 }
             }
         }
-        // Bottom action row: backspace, space (wide), search
+        // Bottom action row: mic, space (wide), backspace
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
+            KeyboardKey(
+                text = "🎙️",
+                onClick = onMic,
+                modifier = Modifier.weight(1.5f),
+                backgroundColor = androidx.compose.ui.graphics.Color(0xFF555555),
+                fontSize = 20
+            )
+            KeyboardKey(
+                text = "ESPACIO",
+                onClick = onSpace,
+                modifier = Modifier.weight(7f),
+                backgroundColor = androidx.compose.ui.graphics.Color(0xFF555555),
+                fontSize = 14
+            )
             KeyboardKey(
                 text = "⌫",
                 onClick = onBackspace,
                 modifier = Modifier.weight(1.5f),
                 backgroundColor = androidx.compose.ui.graphics.Color(0xFF555555),
                 fontSize = 22
-            )
-            KeyboardKey(
-                text = "ESPACIO",
-                onClick = onSpace,
-                modifier = Modifier.weight(5f),
-                backgroundColor = androidx.compose.ui.graphics.Color(0xFF555555),
-                fontSize = 14
-            )
-            KeyboardKey(
-                text = "BUSCAR",
-                onClick = onSearch,
-                modifier = Modifier.weight(1.5f),
-                backgroundColor = DashColors.ACCENT,
-                textColor = androidx.compose.ui.graphics.Color.Black,
-                fontSize = 14
             )
         }
     }
