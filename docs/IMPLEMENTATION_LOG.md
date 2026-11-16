@@ -2,6 +2,20 @@
 
 > Entradas más recientes al principio. Cada entrega real suma una entrada con `Qué / Hecho / Pendiente / Refs`.
 
+## 2026-11-16 — Remover `ColorCalibrationScreen` muerto
+
+**Qué:** Borrado del composable `ColorCalibrationScreen` que no se usa desde que decidimos el color final (`#E60000`). Ocupaba 45 líneas al principio del archivo y confundía al lector.
+
+**Hecho:**
+- Eliminada la función `@Composable fun ColorCalibrationScreen(modifier: Modifier)` completa (de línea 122 a ~166 pre-refactor).
+- Si en el futuro hace falta volver a calibrar un color, se re-crea localmente — la lógica es trivial (una `Column` con 8 `Box` de 70dp cada uno).
+
+**Pendiente:** B, C, D, E del plan de mejoras con impacto.
+
+**Refs:** commit `chore: remove unused ColorCalibrationScreen`.
+
+---
+
 ## 2026-11-16 — Refactor de eficiencia y bug fixes seguros (sin cambio funcional)
 
 **Qué:** Barrido de 10 mejoras al código que NO cambian la funcionalidad visible pero arreglan bugs sutiles, eliminan allocations en loops hot, cierran conexiones HTTP correctamente y reducen duplicación.

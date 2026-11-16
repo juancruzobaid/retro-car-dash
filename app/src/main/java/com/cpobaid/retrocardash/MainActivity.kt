@@ -147,52 +147,6 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@Composable
-fun ColorCalibrationScreen(modifier: Modifier = Modifier) {
-    val colors = listOf(
-        Pair(androidx.compose.ui.graphics.Color(0xFFFF0000), "#FF0000"),
-        Pair(androidx.compose.ui.graphics.Color(0xFFFF0030), "#FF0030"),
-        Pair(androidx.compose.ui.graphics.Color(0xFFFF0050), "#FF0050"),
-        Pair(androidx.compose.ui.graphics.Color(0xFFFF0080), "#FF0080"),
-        Pair(androidx.compose.ui.graphics.Color(0xFFE60000), "#E60000"),
-        Pair(androidx.compose.ui.graphics.Color(0xFFDC143C), "#DC143C"),
-        Pair(androidx.compose.ui.graphics.Color(0xFFB22222), "#B22222"),
-        Pair(androidx.compose.ui.graphics.Color(0xFFFF1500), "#FF1500")
-    )
-
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(androidx.compose.ui.graphics.Color.Black),
-        verticalArrangement = Arrangement.SpaceEvenly
-    ) {
-        colors.forEach { (color, hex) ->
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(70.dp)
-                    .background(color),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = hex,
-                    color = androidx.compose.ui.graphics.Color.White,
-                    fontSize = 28.sp,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace,
-                    style = androidx.compose.ui.text.TextStyle(
-                        shadow = androidx.compose.ui.graphics.Shadow(
-                            color = androidx.compose.ui.graphics.Color.Black,
-                            offset = androidx.compose.ui.geometry.Offset(2f, 2f),
-                            blurRadius = 4f
-                        )
-                    )
-                )
-            }
-        }
-    }
-}
-
 data class SearchResult(val displayName: String, val lat: Double, val lon: Double)
 
 data class SearchResponse(val results: List<SearchResult>, val error: String?)
