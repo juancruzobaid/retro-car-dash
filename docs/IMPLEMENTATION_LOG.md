@@ -2,6 +2,29 @@
 
 > Entradas más recientes al principio. Cada entrega real suma una entrada con `Qué / Hecho / Pendiente / Refs`.
 
+## 2026-11-16 — Refactor de eficiencia y bug fixes seguros (sin cambio funcional)
+
+**Qué:** Barrido de 10 mejoras al código que NO cambian la funcionalidad visible pero arreglan bugs sutiles, eliminan allocations en loops hot, cierran conexiones HTTP correctamente y reducen duplicación.
+
+**Hecho:**
+- **TTS init fix:** la referencia dentro del callback del `TextToSpeech` constructor usaba `tts.value` (null en ese momento) → ahora captura un `var ttsInstance` local por closure (Kotlin captura por referencia), garantizando que `.language = es-AR` se setee cuando el init callback dispara.
+- **Constantes de tipos de maniobra:** `listOf(1,2,3)` y `listOf(4,5,6)` creados en cada tick del loop de maniobra (cada 500ms) → `private val START_MANEUVER_TYPES`, `DESTINATION_MANEUVER_TYPES` top-level, zero allocations.
+- **Logs envueltos en `BuildConfig.DEBUG`:** `Log.d("RetroCarDash", "Search URL: ...")`, `"Response code: ..."`, `"Response body: ..."` → solo se emiten en builds debug. En release no interpolan strings ni imprimen el body completo.
+- **`connection.responseCode` leído dos veces** en `searchPlaces` → reemplazado por la variable `responseCode` ya guardada.
+- **`maneuverIcon` con casos duplicados:** `11 → TurnRight` y `10, 18, 20, 23 → TurnRight` en líneas separadas → agrupado en `10, 11, 18, 20, 23 → TurnRight`. Idem para TurnLeft, Navigation (slight), Refresh (u-turn + roundabout).
+- **Helper `computeMapPadding(displayMetrics, hasRoute, isChaseView): IntArray`** + constantes `BAR_HEIGHT_NO_ROUTE_DP`, `BAR_HEIGHT_WITH_ROUTE_DP`, `CHASE_TOP_PADDING_RATIO` → reemplaza lógica duplicada en 3 lugares (`LaunchedEffect` de padding, `addOnMapClickListener`, `applyChaseView`).
+- **`HttpURLConnection.disconnect()` en `finally`** en las 3 funciones de red (`searchPlaces`, `fetchRoute`, `fetchCurrentStreet`) → evita conexiones colgantes en el pool interno.
+- **`spokenManeuvers.clear()` al cancelar ruta:** antes el set de IDs ya hablados nunca se limpiaba, por lo que una ruta nueva con la misma instrucción textual (ej. "Girar a la derecha") no era anunciada. Ahora se limpia junto con el reset del resto del estado de ruta.
+- **`tts.value?.stop()` al desactivar `ttsEnabled`:** el botón de mute dejaba de disparar nuevos `speak()` pero el que estaba en curso seguía sonando hasta el final. Ahora se detiene inmediatamente.
+- **`spokenManeuvers` thread-safe:** era un `mutableSetOf<String>()` ordinario que el LaunchedEffect podía `.add()` mientras el handler del botón cancelar lo `.clear()` desde el UI thread → `Collections.synchronizedSet(mutableSetOf())`.
+
+**Pendiente:**
+- Parte 3: 5 mejoras con impacto en comportamiento (borrar `ColorCalibrationScreen`, optimizar closest-shape-idx con ventana, skip reverse geocode en reposo, backoff exponencial, centralizar `TextStyle`).
+
+**Refs:** commit `refactor: 10 safe efficiency and bug fixes (no functional changes)`.
+
+---
+
 ## 2026-11-16 — Setup de documentación y workflow
 
 **Qué:** Estandarización de documentación del repo siguiendo el patrón del proyecto `robert`: `AGENTS.md` en raíz + `docs/PROJECT_CONTEXT.md` + `docs/MASTER_PLAN.md` + `docs/IMPLEMENTATION_LOG.md`.

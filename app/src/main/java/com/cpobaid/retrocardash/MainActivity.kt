@@ -97,6 +97,34 @@ object DashColors {
     const val ACCENT_HEX = "#E60000"
 }
 
+// Valhalla maneuver type constants.
+// See: https://valhalla.github.io/valhalla/api/turn-by-turn/api-reference/#maneuver-type
+private val START_MANEUVER_TYPES = setOf(1, 2, 3)         // Start / StartRight / StartLeft
+private val DESTINATION_MANEUVER_TYPES = setOf(4, 5, 6)   // Destination / DestinationRight / DestinationLeft
+
+// Bottom bar heights and chase-view top padding ratio
+private const val BAR_HEIGHT_NO_ROUTE_DP = 48
+private const val BAR_HEIGHT_WITH_ROUTE_DP = 96
+private const val CHASE_TOP_PADDING_RATIO = 0.6
+
+/**
+ * Compute MapLibre padding [left, top, right, bottom] so the user dot
+ * is positioned correctly within the VISIBLE map area (above the bottom bar).
+ * Chase View: dot at 80% from top of visible area (more road ahead).
+ * God View: dot centered in visible area.
+ */
+private fun computeMapPadding(
+    displayMetrics: android.util.DisplayMetrics,
+    hasRoute: Boolean,
+    isChaseView: Boolean
+): IntArray {
+    val barHeightDp = if (hasRoute) BAR_HEIGHT_WITH_ROUTE_DP else BAR_HEIGHT_NO_ROUTE_DP
+    val barHeightPx = (barHeightDp * displayMetrics.density).toInt()
+    val visibleHeightPx = displayMetrics.heightPixels - barHeightPx
+    val topPaddingPx = if (isChaseView) (CHASE_TOP_PADDING_RATIO * visibleHeightPx).toInt() else 0
+    return intArrayOf(0, topPaddingPx, 0, barHeightPx)
+}
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -219,7 +247,8 @@ fun MapScreen(modifier: Modifier = Modifier) {
     var nextManeuverIndex by remember { mutableIntStateOf(0) }
     var nextManeuverDistance by remember { mutableIntStateOf(0) }
     var ttsEnabled by remember { mutableStateOf(true) }
-    val spokenManeuvers = remember { mutableSetOf<String>() }
+    // Thread-safe: UI thread may .clear() it while a LaunchedEffect adds to it
+    val spokenManeuvers = remember { java.util.Collections.synchronizedSet(mutableSetOf<String>()) }
     val tts = remember { mutableStateOf<TextToSpeech?>(null) }
 
     var isSearching by remember { mutableStateOf(false) }
@@ -253,17 +282,21 @@ fun MapScreen(modifier: Modifier = Modifier) {
         }
     }
 
-    // Initialize TTS
+    // Initialize TTS.
+    // Note: the init callback may fire BEFORE the outer `tts.value = ttsInstance`
+    // assignment completes, so we capture a local `var` reference via closure
+    // (Kotlin closures capture vars by reference).
     DisposableEffect(Unit) {
-        val ttsInstance = TextToSpeech(context) { status ->
+        var ttsInstance: TextToSpeech? = null
+        ttsInstance = TextToSpeech(context) { status ->
             if (status == TextToSpeech.SUCCESS) {
-                tts.value?.language = Locale.forLanguageTag("es-AR")
+                ttsInstance?.language = Locale.forLanguageTag("es-AR")
             }
         }
         tts.value = ttsInstance
         onDispose {
-            ttsInstance.stop()
-            ttsInstance.shutdown()
+            ttsInstance?.stop()
+            ttsInstance?.shutdown()
         }
     }
 
@@ -444,7 +477,7 @@ fun MapScreen(modifier: Modifier = Modifier) {
 
                         val upcomingIdx = routeManeuvers.indexOfFirst { m ->
                             m.beginShapeIndex > closestShapeIdx &&
-                            m.type !in listOf(1, 2, 3)
+                            m.type !in START_MANEUVER_TYPES
                         }
 
                         if (upcomingIdx >= 0) {
@@ -456,7 +489,7 @@ fun MapScreen(modifier: Modifier = Modifier) {
                             ).toInt()
                         } else {
                             val destIdx = routeManeuvers.indexOfLast {
-                                it.type in listOf(4, 5, 6)
+                                it.type in DESTINATION_MANEUVER_TYPES
                             }
                             if (destIdx >= 0) {
                                 nextManeuverIndex = destIdx
@@ -479,18 +512,12 @@ fun MapScreen(modifier: Modifier = Modifier) {
     // Unified LaunchedEffect for map padding relative to visible area
     LaunchedEffect(isChaseView, routeGeometry.isNotEmpty(), mapLibreMapInstance) {
         val map = mapLibreMapInstance ?: return@LaunchedEffect
-        val displayMetrics = context.resources.displayMetrics
-        val screenHeightPx = displayMetrics.heightPixels
-        val barHeightPx = if (routeGeometry.isNotEmpty())
-            (96 * displayMetrics.density).toInt()
-            else (48 * displayMetrics.density).toInt()
-        val visibleHeightPx = screenHeightPx - barHeightPx
-
-        val topPaddingPx = if (isChaseView)
-            (0.6 * visibleHeightPx).toInt()
-            else 0
-
-        map.setPadding(0, topPaddingPx, 0, barHeightPx)
+        val p = computeMapPadding(
+            context.resources.displayMetrics,
+            hasRoute = routeGeometry.isNotEmpty(),
+            isChaseView = isChaseView
+        )
+        map.setPadding(p[0], p[1], p[2], p[3])
     }
 
     // Reverse geocode current street every 3 seconds
@@ -660,16 +687,12 @@ fun MapScreen(modifier: Modifier = Modifier) {
                                     if (isChaseView) CameraMode.TRACKING_GPS else CameraMode.TRACKING
 
                                 // Apply padding synchronously so animateCamera uses the new value
-                                val displayMetrics = context.resources.displayMetrics
-                                val screenHeightPx = displayMetrics.heightPixels
-                                val barHeightPx = if (routeGeometry.isNotEmpty())
-                                    (96 * displayMetrics.density).toInt()
-                                    else (48 * displayMetrics.density).toInt()
-                                val visibleHeightPx = screenHeightPx - barHeightPx
-                                val topPaddingPx = if (isChaseView)
-                                    (0.6 * visibleHeightPx).toInt()
-                                    else 0
-                                mapLibreMap.setPadding(0, topPaddingPx, 0, barHeightPx)
+                                val p = computeMapPadding(
+                                    context.resources.displayMetrics,
+                                    hasRoute = routeGeometry.isNotEmpty(),
+                                    isChaseView = isChaseView
+                                )
+                                mapLibreMap.setPadding(p[0], p[1], p[2], p[3])
 
                                 val location = mapLibreMap.locationComponent.lastKnownLocation
                                 val target = if (location != null)
@@ -796,6 +819,8 @@ fun MapScreen(modifier: Modifier = Modifier) {
                                     routeManeuvers = emptyList()
                                     nextManeuverIndex = 0
                                     nextManeuverDistance = 0
+                                    // Clear so a re-navigated route with the same instruction text speaks again
+                                    spokenManeuvers.clear()
                                     spokenManeuvers.clear()
                                 },
                             contentAlignment = Alignment.Center
@@ -832,7 +857,11 @@ fun MapScreen(modifier: Modifier = Modifier) {
                             modifier = Modifier
                                 .fillMaxHeight()
                                 .width(64.dp)
-                                .clickable { ttsEnabled = !ttsEnabled },
+                                .clickable {
+                                    ttsEnabled = !ttsEnabled
+                                    // Stop any speech in progress when muting
+                                    if (!ttsEnabled) tts.value?.stop()
+                                },
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
@@ -910,7 +939,11 @@ fun MapScreen(modifier: Modifier = Modifier) {
                         modifier = Modifier
                             .fillMaxHeight()
                             .width(64.dp)
-                            .clickable { ttsEnabled = !ttsEnabled },
+                            .clickable {
+                                ttsEnabled = !ttsEnabled
+                                // Stop any speech in progress when muting
+                                if (!ttsEnabled) tts.value?.stop()
+                            },
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
@@ -1088,14 +1121,12 @@ private fun applyChaseView(
 
     mapLibreMap.locationComponent.cameraMode = CameraMode.TRACKING_GPS
 
-    val displayMetrics = context.resources.displayMetrics
-    val screenHeightPx = displayMetrics.heightPixels
-    val barHeightPx = if (hasRoute)
-        (96 * displayMetrics.density).toInt()
-        else (48 * displayMetrics.density).toInt()
-    val visibleHeightPx = screenHeightPx - barHeightPx
-    val topPaddingPx = (0.6 * visibleHeightPx).toInt()
-    mapLibreMap.setPadding(0, topPaddingPx, 0, barHeightPx)
+    val p = computeMapPadding(
+        context.resources.displayMetrics,
+        hasRoute = hasRoute,
+        isChaseView = true
+    )
+    mapLibreMap.setPadding(p[0], p[1], p[2], p[3])
 
     val location = mapLibreMap.locationComponent.lastKnownLocation
     val target = if (location != null)
@@ -1123,6 +1154,7 @@ private suspend fun searchPlaces(
 ): SearchResponse {
     return withContext(Dispatchers.IO) {
         val results = mutableListOf<SearchResult>()
+        var connection: HttpURLConnection? = null
         try {
             val encoded = URLEncoder.encode(query, "UTF-8")
             val urlBuilder = StringBuilder("https://photon.komoot.io/api/?q=$encoded&limit=8")
@@ -1130,21 +1162,21 @@ private suspend fun searchPlaces(
                 urlBuilder.append("&lat=$focusLat&lon=$focusLon")
             }
             val urlString = urlBuilder.toString()
-            Log.d("RetroCarDash", "Search URL: $urlString")
+            if (BuildConfig.DEBUG) Log.d("RetroCarDash", "Search URL: $urlString")
 
             val url = URL(urlString)
-            val connection = url.openConnection() as HttpURLConnection
+            connection = url.openConnection() as HttpURLConnection
             connection.requestMethod = "GET"
             connection.setRequestProperty("Accept", "application/json")
             connection.connectTimeout = 5000
             connection.readTimeout = 5000
 
             val responseCode = connection.responseCode
-            Log.d("RetroCarDash", "Response code: $responseCode")
+            if (BuildConfig.DEBUG) Log.d("RetroCarDash", "Response code: $responseCode")
 
-            if (connection.responseCode == HttpURLConnection.HTTP_OK) {
+            if (responseCode == HttpURLConnection.HTTP_OK) {
                 val response = connection.inputStream.bufferedReader().use { it.readText() }
-                Log.d("RetroCarDash", "Response body: $response")
+                if (BuildConfig.DEBUG) Log.d("RetroCarDash", "Response body: $response")
 
                 val json = JSONObject(response)
                 if (json.has("features")) {
@@ -1199,6 +1231,8 @@ private suspend fun searchPlaces(
         } catch (e: Exception) {
             Log.e("RetroCarDash", "Search error", e)
             return@withContext SearchResponse(emptyList(), e.localizedMessage ?: "Unknown error")
+        } finally {
+            connection?.disconnect()
         }
     }
 }
@@ -1211,10 +1245,11 @@ private suspend fun fetchRoute(
     apiKey: String
 ): RouteResult? {
     return withContext(Dispatchers.IO) {
+        var connection: HttpURLConnection? = null
         try {
             val urlString = "https://api.stadiamaps.com/route/v1?api_key=$apiKey"
             val url = URL(urlString)
-            val connection = url.openConnection() as HttpURLConnection
+            connection = url.openConnection() as HttpURLConnection
             connection.requestMethod = "POST"
             connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
             connection.setRequestProperty("Accept", "application/json")
@@ -1286,6 +1321,8 @@ private suspend fun fetchRoute(
             }
         } catch (e: Exception) {
             // Ignore
+        } finally {
+            connection?.disconnect()
         }
         null
     }
@@ -1327,20 +1364,16 @@ private fun decodePolyline(encoded: String, precision: Double = 1e6): List<LatLn
     return poly
 }
 
+// Maps Valhalla maneuver type to a Material icon.
+// See: https://valhalla.github.io/valhalla/api/turn-by-turn/api-reference/#maneuver-type
 private fun maneuverIcon(type: Int): ImageVector = when (type) {
-    1, 7, 8, 17, 22 -> Icons.Filled.Straight
-    2, 9 -> Icons.Filled.Navigation
-    3, 16 -> Icons.Filled.Navigation
-    10 -> Icons.Filled.TurnRight
-    15 -> Icons.Filled.TurnLeft
-    11 -> Icons.Filled.TurnRight
-    14 -> Icons.Filled.TurnLeft
-    12, 13 -> Icons.Filled.Refresh
-    18, 20, 23 -> Icons.Filled.TurnRight
-    19, 21, 24 -> Icons.Filled.TurnLeft
-    25 -> Icons.Filled.SwapHoriz
-    26, 27 -> Icons.Filled.Refresh
-    4, 5, 6 -> Icons.Filled.Flag
+    1, 7, 8, 17, 22 -> Icons.Filled.Straight             // start / continue / straight / ramp / stay straight
+    2, 3, 9, 16 -> Icons.Filled.Navigation               // slight right / slight left (incl. starts)
+    10, 11, 18, 20, 23 -> Icons.Filled.TurnRight         // right / sharp right / ramp right / exit right / stay right
+    14, 15, 19, 21, 24 -> Icons.Filled.TurnLeft          // left / sharp left / ramp left / exit left / stay left
+    12, 13, 26, 27 -> Icons.Filled.Refresh               // u-turn / roundabout enter / roundabout exit
+    25 -> Icons.Filled.SwapHoriz                         // merge
+    4, 5, 6 -> Icons.Filled.Flag                         // destination variants
     else -> Icons.Filled.Straight
 }
 
@@ -1357,10 +1390,11 @@ private fun haversineMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Doub
 
 private suspend fun fetchCurrentStreet(lat: Double, lon: Double): String? {
     return withContext(Dispatchers.IO) {
+        var connection: HttpURLConnection? = null
         try {
             val urlString = "https://nominatim.openstreetmap.org/reverse?lat=$lat&lon=$lon&format=json&zoom=17&addressdetails=1"
             val url = URL(urlString)
-            val connection = url.openConnection() as HttpURLConnection
+            connection = url.openConnection() as HttpURLConnection
             connection.requestMethod = "GET"
             connection.setRequestProperty("User-Agent", "RetroCarDash/1.0 (personal-use)")
             connection.connectTimeout = 5000
@@ -1384,6 +1418,8 @@ private suspend fun fetchCurrentStreet(lat: Double, lon: Double): String? {
             }
         } catch (e: Exception) {
             // Silently ignore network failures
+        } finally {
+            connection?.disconnect()
         }
         null
     }
