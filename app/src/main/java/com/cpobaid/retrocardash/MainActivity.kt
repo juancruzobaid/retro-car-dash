@@ -27,7 +27,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Backspace
-import androidx.compose.material.icons.automirrored.filled.RecordVoiceOver
+import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Close
@@ -1616,7 +1616,7 @@ fun CustomKeyboard(
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             KeyboardIconKey(
-                icon = Icons.AutoMirrored.Filled.RecordVoiceOver,
+                icon = Icons.Filled.RecordVoiceOver,
                 contentDescription = "Dictar por voz",
                 onClick = onMic,
                 modifier = Modifier.weight(1.5f)

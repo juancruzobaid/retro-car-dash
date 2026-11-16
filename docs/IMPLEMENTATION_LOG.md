@@ -2,6 +2,18 @@
 
 > Entradas más recientes al principio. Cada entrega real suma una entrada con `Qué / Hecho / Pendiente / Refs`.
 
+## 2026-11-16 — Fix: RecordVoiceOver no vive en AutoMirrored
+
+**Qué:** El build fallaba con `Unresolved reference 'RecordVoiceOver'` en el import y el uso.
+
+**Hecho:**
+- Cambiar el import y el uso a `Icons.Filled.RecordVoiceOver` (`AutoMirrored` solo tiene iconos con direccionalidad).
+- `Backspace` se queda en `AutoMirrored` (ese sí tiene direccionalidad).
+
+**Pendiente:** Verificar build en Android Studio (`Shift+F10`).
+
+**Refs:** commit "fix: RecordVoiceOver no vive en Icons.AutoMirrored.Filled" (sigue a `1bf8472`).
+
 ## 2026-11-16 — Teclado custom con estética BMW + icono de comando de voz
 
 **Qué:** El teclado custom adopta el mismo lenguaje visual del bottom bar (commit `09ecdac`): datos = display rojizo con texto acento, controles = icono blanco sobre negro. Además se reemplazan los emojis del mic y backspace por iconos vectoriales de Material.
