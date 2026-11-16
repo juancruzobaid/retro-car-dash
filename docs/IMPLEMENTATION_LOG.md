@@ -2,6 +2,26 @@
 
 > Entradas más recientes al principio. Cada entrega real suma una entrada con `Qué / Hecho / Pendiente / Refs`.
 
+## 2026-11-16 — Backoff exponencial en el loop de reverse geocode
+
+**Qué:** Si la conexión a Nominatim está rota (sin internet, servidor caído, timeout), el loop reintentaba cada 3 s indefinidamente. Esto consume batería (coroutine activa, request, parse) y es poco respetuoso con el servicio cuando el fallo se prolonga.
+
+**Hecho:**
+- Variable local `consecutiveFailures: Int` dentro del `LaunchedEffect`.
+- Delay efectivo: `3000L shl consecutiveFailures` → 3 s, 6 s, 12 s, 24 s, 48 s (capped en 48 s con `coerceAtMost(4)` sobre el exponente).
+- Se distingue "intentó y falló" (incrementa) vs "no intentó porque no se movió" (resetea el contador, parked = estado saludable).
+- Se resetea en el primer éxito, volviendo a 3 s inmediatamente.
+
+**Notas:**
+- `fetchCurrentStreet` retorna `null` tanto en falla de red como en "no hay calle acá" (ej. ruta sin OSM). Para simplicidad, ambos casos cuentan como falla y disparan backoff. No es ideal pero es benigno — en zonas sin calles cercanas, retrás los retries lejos de ser malo.
+- Aplicable solo a este loop. Los otros loops activos (speed polling cada 500 ms, TTS loop cada 2 s, next maneuver cada 500 ms) no hacen red.
+
+**Pendiente:** E.
+
+**Refs:** commit `perf: exponential backoff on reverse geocode failures`.
+
+---
+
 ## 2026-11-16 — Skip reverse geocode cuando la posición no cambió significativamente
 
 **Qué:** El loop de reverse geocode (Nominatim) corría cada 3 s incondicionalmente, incluso con el auto parado (semáforos, tráfico lento, estacionado). Nominatim tiene una política de uso razonable (<1 req/s por usuario) y además es trabajo desperdiciado porque el nombre de la calle no cambia si no te moviste.

@@ -505,15 +505,22 @@ fun MapScreen(modifier: Modifier = Modifier) {
     }
 
     // Reverse geocode current street every 3 seconds.
-    // Skip the network call if the user hasn't moved more than 30m since the
-    // last successful geocode (parked, slow traffic, etc.) — the street name
-    // can't have changed, so we save Nominatim requests.
+    // - Skip the network call if the user hasn't moved more than 30m since the
+    //   last successful geocode (parked, slow traffic, etc.) — the street name
+    //   can't have changed, so we save Nominatim requests.
+    // - Exponential backoff on repeated network failures to avoid hammering
+    //   Nominatim when the connection is bad: 3s, 6s, 12s, 24s, 48s (capped).
+    //   A successful response or a successful skip (no movement) resets the
+    //   backoff.
     LaunchedEffect(mapLibreMapInstance) {
         val map = mapLibreMapInstance
         if (map != null) {
             var lastGeoLat = Double.NaN
             var lastGeoLon = Double.NaN
+            var consecutiveFailures = 0
             while (true) {
+                var didAttemptRequest = false
+                var requestSucceeded = false
                 try {
                     if (map.locationComponent.isLocationComponentActivated) {
                         val location = map.locationComponent.lastKnownLocation
@@ -523,11 +530,13 @@ fun MapScreen(modifier: Modifier = Modifier) {
                                 location.latitude, location.longitude
                             ) > 30.0
                             if (movedEnough) {
+                                didAttemptRequest = true
                                 val street = fetchCurrentStreet(location.latitude, location.longitude)
                                 if (street != null) {
                                     currentStreetName = street
                                     lastGeoLat = location.latitude
                                     lastGeoLon = location.longitude
+                                    requestSucceeded = true
                                 }
                             }
                         }
@@ -535,7 +544,16 @@ fun MapScreen(modifier: Modifier = Modifier) {
                 } catch (e: Exception) {
                     // Silently ignore network failures
                 }
-                delay(3000L)
+                // Only backoff when we actually tried and failed; skipping
+                // (parked) is a healthy state and resets the failure counter.
+                consecutiveFailures = if (didAttemptRequest && !requestSucceeded) {
+                    (consecutiveFailures + 1).coerceAtMost(4)
+                } else {
+                    0
+                }
+                // 3s * 2^failures: 3, 6, 12, 24, 48 seconds
+                val backoffDelay = 3000L shl consecutiveFailures
+                delay(backoffDelay)
             }
         }
     }
