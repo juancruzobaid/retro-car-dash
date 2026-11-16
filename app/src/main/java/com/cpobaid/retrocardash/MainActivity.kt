@@ -779,6 +779,154 @@ fun MapScreen(modifier: Modifier = Modifier) {
             }
         )
 
+        // Full-width search overlay above the map (replaces ModalBottomSheet).
+        // Covers everything except the bottom bar (48dp). Toggled from the
+        // DESTINO button in the bottom bar. Declared before the bottom bar so
+        // the bar renders on top of it.
+        if (showSearchSheet) {
+            Column(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .fillMaxHeight()
+                    .padding(bottom = 48.dp)  // reserve room for the no-route bottom bar
+                    .background(androidx.compose.ui.graphics.Color.Black)
+                    .padding(12.dp)
+            ) {
+                // Input display
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(
+                            width = 1.dp,
+                            color = DashColors.ACCENT,
+                            shape = RoundedCornerShape(8.dp)
+                        )
+                        .padding(horizontal = 12.dp, vertical = 10.dp)
+                ) {
+                    Text(
+                        text = if (searchQuery.isBlank()) "Buscar destino..." else searchQuery,
+                        style = if (searchQuery.isBlank())
+                            DashTextStyles.gray(18)
+                        else
+                            DashTextStyles.white(18)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                // Status text
+                Text(
+                    text = searchStatus,
+                    style = DashTextStyles.gray(12),
+                    modifier = Modifier.padding(vertical = 2.dp)
+                )
+
+                // Results fill the remaining space between status and the keyboard
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                ) {
+                    if (isSearching) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(color = DashColors.ACCENT)
+                        }
+                    } else if (searchResults.isNotEmpty()) {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(androidx.compose.ui.graphics.Color.Black)
+                        ) {
+                            items(searchResults) { result ->
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            showSearchSheet = false
+                                            searchQuery = ""
+                                            destination = LatLng(result.lat, result.lon)
+                                            coroutineScope.launch {
+                                                val map = mapLibreMapInstance
+                                                if (map != null && map.locationComponent.isLocationComponentActivated) {
+                                                    val loc = map.locationComponent.lastKnownLocation
+                                                    if (loc != null) {
+                                                        val route = fetchRoute(
+                                                            loc.latitude, loc.longitude,
+                                                            result.lat, result.lon,
+                                                            BuildConfig.STADIA_MAPS_API_KEY
+                                                        )
+                                                        if (route != null) {
+                                                            routeGeometry = route.geometry
+                                                            routeDistance = route.distanceKm
+                                                            routeDuration = route.durationSeconds / 60
+                                                            routeInstructions = route.instructions
+                                                            routeManeuvers = route.maneuvers
+                                                            nextManeuverIndex = 0
+                                                            nextManeuverDistance = 0
+                                                            spokenManeuvers.clear()
+                                                            lastClosestShapeIdx = 0
+
+                                                            isChaseView = true
+                                                            mapLibreMapInstance?.let { m ->
+                                                                applyChaseView(m, context, hasRoute = true)
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        .padding(vertical = 8.dp, horizontal = 8.dp)
+                                ) {
+                                    Text(
+                                        text = result.displayName,
+                                        style = DashTextStyles.white(14)
+                                    )
+                                    HorizontalDivider(
+                                        color = androidx.compose.ui.graphics.Color.DarkGray,
+                                        modifier = Modifier.padding(top = 4.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Custom keyboard, full width (natural height ~280dp)
+                CustomKeyboard(
+                    onKeyPress = { key -> searchQuery += key },
+                    onBackspace = {
+                        if (searchQuery.isNotEmpty())
+                            searchQuery = searchQuery.dropLast(1)
+                    },
+                    onSpace = { searchQuery += " " },
+                    onMic = {
+                        try {
+                            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                                putExtra(
+                                    RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                                    RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+                                )
+                                putExtra(RecognizerIntent.EXTRA_LANGUAGE, "es-AR")
+                                putExtra(
+                                    RecognizerIntent.EXTRA_PROMPT,
+                                    "Decí la dirección"
+                                )
+                            }
+                            speechLauncher.launch(intent)
+                        } catch (e: Exception) {
+                            Log.e("RetroCarDash", "Speech recognition not available", e)
+                        }
+                    }
+                )
+            }
+        }
+
         // Unified Bottom Panel (conditional structure based on active route)
         if (routeGeometry.isNotEmpty() && nextManeuverIndex < routeManeuvers.size) {
             // ====================================================
@@ -959,7 +1107,7 @@ fun MapScreen(modifier: Modifier = Modifier) {
                     DisplayBox(
                         modifier = Modifier
                             .fillMaxSize()
-                            .clickable { showSearchSheet = true }
+                            .clickable { showSearchSheet = !showSearchSheet }
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically
@@ -1017,152 +1165,6 @@ fun MapScreen(modifier: Modifier = Modifier) {
                             modifier = Modifier.size(32.dp)
                         )
                     }
-                }
-            }
-        }
-
-        // Search Bottom Sheet with custom in-app keyboard
-        if (showSearchSheet) {
-            val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-            ModalBottomSheet(
-                onDismissRequest = { showSearchSheet = false },
-                sheetState = sheetState
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(androidx.compose.ui.graphics.Color.Black)
-                        .padding(12.dp)
-                ) {
-                    // Input display (no system keyboard, just shows the query)
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .border(
-                                width = 1.dp,
-                                color = DashColors.ACCENT,
-                                shape = RoundedCornerShape(8.dp)
-                            )
-                            .padding(horizontal = 12.dp, vertical = 10.dp)
-                    ) {
-                        Text(
-                            text = if (searchQuery.isBlank()) "Buscar destino..." else searchQuery,
-                            style = if (searchQuery.isBlank())
-                                DashTextStyles.gray(18)
-                            else
-                                DashTextStyles.white(18)
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    // Status text
-                    Text(
-                        text = searchStatus,
-                        style = DashTextStyles.gray(12),
-                        modifier = Modifier.padding(vertical = 2.dp)
-                    )
-
-                    // Results list (compact)
-                    if (isSearching) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(8.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            CircularProgressIndicator(color = DashColors.ACCENT)
-                        }
-                    } else if (searchResults.isNotEmpty()) {
-                        LazyColumn(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(max = 150.dp)
-                                .background(androidx.compose.ui.graphics.Color.Black)
-                        ) {
-                            items(searchResults) { result ->
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable {
-                                            showSearchSheet = false
-                                            searchQuery = ""
-                                            destination = LatLng(result.lat, result.lon)
-                                            coroutineScope.launch {
-                                                val map = mapLibreMapInstance
-                                                if (map != null && map.locationComponent.isLocationComponentActivated) {
-                                                    val loc = map.locationComponent.lastKnownLocation
-                                                    if (loc != null) {
-                                                        val route = fetchRoute(
-                                                            loc.latitude, loc.longitude,
-                                                            result.lat, result.lon,
-                                                            BuildConfig.STADIA_MAPS_API_KEY
-                                                        )
-                                                        if (route != null) {
-                                                            routeGeometry = route.geometry
-                                                            routeDistance = route.distanceKm
-                                                            routeDuration = route.durationSeconds / 60
-                                                            routeInstructions = route.instructions
-                                                            routeManeuvers = route.maneuvers
-                                                            nextManeuverIndex = 0
-                                                            nextManeuverDistance = 0
-                                                            spokenManeuvers.clear()
-                                                            // Reset the sliding-window hint for the new route
-                                                            lastClosestShapeIdx = 0
-
-                                                            isChaseView = true
-                                                            mapLibreMapInstance?.let { m ->
-                                                                applyChaseView(m, context, hasRoute = true)
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        .padding(vertical = 8.dp, horizontal = 8.dp)
-                                ) {
-                                    Text(
-                                        text = result.displayName,
-                                        style = DashTextStyles.white(14)
-                                    )
-                                    HorizontalDivider(
-                                        color = androidx.compose.ui.graphics.Color.DarkGray,
-                                        modifier = Modifier.padding(top = 4.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    // Custom keyboard with speech recognition input
-                    CustomKeyboard(
-                        onKeyPress = { key -> searchQuery += key },
-                        onBackspace = {
-                            if (searchQuery.isNotEmpty())
-                                searchQuery = searchQuery.dropLast(1)
-                        },
-                        onSpace = { searchQuery += " " },
-                        onMic = {
-                            try {
-                                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                                    putExtra(
-                                        RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                                        RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
-                                    )
-                                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, "es-AR")
-                                    putExtra(
-                                        RecognizerIntent.EXTRA_PROMPT,
-                                        "Decí la dirección"
-                                    )
-                                }
-                                speechLauncher.launch(intent)
-                            } catch (e: Exception) {
-                                Log.e("RetroCarDash", "Speech recognition not available", e)
-                            }
-                        }
-                    )
                 }
             }
         }

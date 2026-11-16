@@ -2,6 +2,27 @@
 
 > Entradas más recientes al principio. Cada entrega real suma una entrada con `Qué / Hecho / Pendiente / Refs`.
 
+## 2026-11-16 — Búsqueda de destino: overlay full-width del mapa, bottom bar visible, toggle con DESTINO
+
+**Qué:** Eliminar el `ModalBottomSheet` (traía el drag-handle blanco arriba y el padding de la gesture bar abajo, no coherente con la estética de la app) y reemplazar por un overlay negro sólido que ocupa todo el ancho y toda la altura del mapa (sin tapar el bottom bar inferior de 48dp). La metáfora es "el botón DESTINO se expande en teclado".
+
+**Hecho:**
+- Nuevo overlay custom dentro del `Box` principal, posicionado con `Alignment.TopCenter`, `fillMaxSize()` con `padding(bottom = 48.dp)` para dejar ver el bottom bar. Declarado antes del bottom bar para que éste quede encima.
+- Fondo negro sólido (`Color.Black`), sin drag handle, sin insets de system bars.
+- Layout interno: input display → status → `Box` con `weight(1f)` para los resultados (ocupan el espacio sobrante y hacen scroll si hay muchos) → `CustomKeyboard` abajo con su altura natural.
+- Toggle: tap en DESTINO del bottom bar cambia `showSearchSheet = !showSearchSheet` (D1).
+- Sin botón X aparte (D1).
+- Sin animación (D3). Pulido futuro con `AnimatedVisibility` slide-up.
+- La etiqueta "Destino" no cambia al estar abierto el teclado (D4).
+- Al seleccionar un resultado: se cierra el overlay, limpia `searchQuery` y traza la ruta (comportamiento idéntico al anterior).
+
+**Pendiente:**
+- Posible edge case: si el usuario abre el teclado y YA hay una ruta activa, el bottom bar es de 96dp (no 48dp) y el padding del overlay quedaría corto. Hoy el DESTINO solo existe en el modo sin ruta, así que no se puede dar; tenerlo presente cuando introduzcamos "editar destino" en modo con ruta.
+- Animación slide-up para la próxima versión.
+- Verificar build en Android Studio (`Shift+F10`).
+
+**Refs:** commit "feat: search overlay full-width sobre el mapa, bottom bar siempre visible".
+
 ## 2026-11-16 — Fix: RecordVoiceOver no vive en AutoMirrored
 
 **Qué:** El build fallaba con `Unresolved reference 'RecordVoiceOver'` en el import y el uso.
