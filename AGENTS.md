@@ -57,6 +57,12 @@ El target físico es **Samsung Galaxy Tab A11 WiFi (SM-X133)** montada en el tor
 - Logs de debug envueltos con `if (BuildConfig.DEBUG)` — no imprimir response bodies en release.
 - `try/catch` ancho en los loops de `LaunchedEffect` para que un fallo de red no mate la corutina.
 
+### Build y testing
+
+- **El agente NO compila ni testea.** Nunca correr `./gradlew assembleDebug`, `./gradlew installDebug`, `./gradlew test`, ni ningún comando de build/verify del proyecto Android, salvo que el usuario lo pida explícitamente. El entorno del agente no tiene Android SDK configurado; cualquier intento de compilar va a fallar y no agrega información útil.
+- **El build y el test corren en la Mac del usuario** después de cada pull. El agente aplica cambios, commitea y pushea; el usuario abre Android Studio y verifica con `Shift+F10`.
+- **Si un cambio puede introducir un error de compilación**, decirlo explícitamente en el commit message o en la respuesta ("este cambio puede romper X si el nombre del método cambió entre versiones", etc.) para que el usuario esté atento al build.
+
 ### Permisos
 
 - Permisos declarados en `AndroidManifest.xml`. Hoy: `INTERNET`, `ACCESS_FINE_LOCATION`, `ACCESS_COARSE_LOCATION`.
