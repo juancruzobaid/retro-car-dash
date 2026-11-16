@@ -94,8 +94,16 @@ import java.util.Date
 import java.util.Locale
 
 object DashColors {
+    // Primary accent: text and icons inside data "displays" and the drawn route on the map.
     val ACCENT = androidx.compose.ui.graphics.Color(0xFFE60000)
     const val ACCENT_HEX = "#E60000"
+
+    // Dark reddish background used for "display" tiles (BMW-style instrument panel).
+    val DISPLAY_BG = androidx.compose.ui.graphics.Color(0xFF4A0000)
+
+    // Icon color for pure "control" buttons (cancel X, volume toggle) — kept visually
+    // separate from the data displays so the eye distinguishes controls from readouts.
+    val BUTTON_ICON = androidx.compose.ui.graphics.Color.White
 }
 
 /**
@@ -689,7 +697,10 @@ fun MapScreen(modifier: Modifier = Modifier) {
                                 if (labelKeywords.any { id.contains(it) } && !id.contains("place") && !id.contains("settlement") && !id.contains("country")) {
                                     matchedSymbolLayers.add(layer)
                                     layer.setProperties(
-                                        PropertyFactory.textColor(Color.parseColor(DashColors.ACCENT_HEX)),
+                                        // Street names in WHITE so they read as "map data", not as part of
+                                        // the red-accent UI of the dashboard overlay. Thick halo keeps them
+                                        // readable against the dark base map.
+                                        PropertyFactory.textColor(Color.parseColor("#FFFFFF")),
                                         PropertyFactory.textHaloColor(Color.parseColor("#000000")),
                                         PropertyFactory.textHaloWidth(4.0f),
                                         PropertyFactory.textHaloBlur(1.0f),
@@ -780,7 +791,7 @@ fun MapScreen(modifier: Modifier = Modifier) {
                     .background(androidx.compose.ui.graphics.Color.Black),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // LEFT 50%: maneuver icon + distance + instruction
+                // LEFT 50%: maneuver icon + distance display + instruction display
                 Row(
                     modifier = Modifier.weight(0.5f).fillMaxHeight(),
                     verticalAlignment = Alignment.CenterVertically
@@ -792,43 +803,50 @@ fun MapScreen(modifier: Modifier = Modifier) {
                             .padding(vertical = 6.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
+                        // Maneuver arrow: data readout, so accent color (no button box)
                         Icon(
                             imageVector = maneuverIcon(maneuver.type),
                             contentDescription = null,
                             tint = DashColors.ACCENT,
                             modifier = Modifier.weight(0.75f).fillMaxWidth()
                         )
-                        Text(
-                            text = "A ${nextManeuverDistance}m",
-                            style = DashTextStyles.accent(13),
-                            modifier = Modifier.weight(0.25f).wrapContentHeight()
-                        )
+                        DisplayBox(
+                            modifier = Modifier.weight(0.25f).wrapContentHeight(),
+                            verticalPadding = 2
+                        ) {
+                            Text(
+                                text = "A ${nextManeuverDistance}m",
+                                style = DashTextStyles.accent(13)
+                            )
+                        }
                     }
-                    Box(
-                        modifier = Modifier.weight(1f).fillMaxHeight()
-                            .padding(horizontal = 12.dp),
-                        contentAlignment = Alignment.CenterStart
+                    DisplayBox(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .padding(horizontal = 8.dp, vertical = 8.dp)
                     ) {
                         Text(
                             text = maneuver.instruction.trimEnd('.', ' '),
                             style = DashTextStyles.accent(20).copy(lineHeight = 26.sp),
+                            textAlign = TextAlign.Center,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
 
-                // RIGHT 50%: top line (route info + cancel X),
-                //           bottom line (street centered + volume)
+                // RIGHT 50%: top line (route info display + cancel button),
+                //           bottom line (street display + volume button)
                 Column(
                     modifier = Modifier.weight(0.5f).fillMaxHeight()
                 ) {
-                    // TOP LINE: route info centered + Cancel X on far right
+                    // TOP LINE
                     Row(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxWidth()
-                            .padding(start = 8.dp),
+                            .padding(start = 8.dp, top = 4.dp, bottom = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         val arrivalTimeMillis = System.currentTimeMillis() +
@@ -836,14 +854,17 @@ fun MapScreen(modifier: Modifier = Modifier) {
                         val arrivalTimeStr = SimpleDateFormat(
                             "HH:mm", Locale.getDefault()
                         ).format(Date(arrivalTimeMillis))
-                        Text(
-                            text = "$arrivalTimeStr · $routeDuration min · ${String.format(Locale.getDefault(), "%.1f", routeDistance)} km",
-                            style = DashTextStyles.accent(16),
-                            textAlign = TextAlign.Center,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f)
-                        )
+                        DisplayBox(
+                            modifier = Modifier.weight(1f).fillMaxHeight()
+                        ) {
+                            Text(
+                                text = "$arrivalTimeStr · $routeDuration min · ${String.format(Locale.getDefault(), "%.1f", routeDistance)} km",
+                                style = DashTextStyles.accent(16),
+                                textAlign = TextAlign.Center,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                         Box(
                             modifier = Modifier
                                 .fillMaxHeight()
@@ -865,28 +886,31 @@ fun MapScreen(modifier: Modifier = Modifier) {
                             Icon(
                                 imageVector = Icons.Filled.Close,
                                 contentDescription = "Cancel Route",
-                                tint = DashColors.ACCENT,
+                                tint = DashColors.BUTTON_ICON,
                                 modifier = Modifier.size(28.dp)
                             )
                         }
                     }
-                    // BOTTOM LINE: street name centered + Volume on far right
+                    // BOTTOM LINE
                     Row(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxWidth()
-                            .padding(start = 8.dp),
+                            .padding(start = 8.dp, top = 4.dp, bottom = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = if (currentStreetName.isNullOrBlank()) ""
-                                   else "Por $currentStreetName",
-                            style = DashTextStyles.accent(18),
-                            textAlign = TextAlign.Center,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f)
-                        )
+                        DisplayBox(
+                            modifier = Modifier.weight(1f).fillMaxHeight()
+                        ) {
+                            Text(
+                                text = if (currentStreetName.isNullOrBlank()) ""
+                                       else "Por $currentStreetName",
+                                style = DashTextStyles.accent(18),
+                                textAlign = TextAlign.Center,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                         Box(
                             modifier = Modifier
                                 .fillMaxHeight()
@@ -903,7 +927,7 @@ fun MapScreen(modifier: Modifier = Modifier) {
                                              else Icons.AutoMirrored.Filled.VolumeOff,
                                 contentDescription = if (ttsEnabled) "Silenciar"
                                                     else "Activar voz",
-                                tint = DashColors.ACCENT,
+                                tint = DashColors.BUTTON_ICON,
                                 modifier = Modifier.size(32.dp)
                             )
                         }
@@ -922,38 +946,46 @@ fun MapScreen(modifier: Modifier = Modifier) {
                     .background(androidx.compose.ui.graphics.Color.Black),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // LEFT 50%: "Destino 🔍" clickable
+                // LEFT 50%: "Destino 🔍" — hybrid display-styled clickable box
                 Row(
                     modifier = Modifier
                         .weight(0.5f)
                         .fillMaxHeight()
-                        .clickable { showSearchSheet = true },
-                    horizontalArrangement = Arrangement.Center,
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "Destino",
-                        style = DashTextStyles.accent(20)
-                    )
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Icon(
-                        imageVector = Icons.Filled.Search,
-                        contentDescription = "Search Destination",
-                        tint = DashColors.ACCENT,
-                        modifier = Modifier.size(24.dp)
-                    )
+                    DisplayBox(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clickable { showSearchSheet = true }
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Destino",
+                                style = DashTextStyles.accent(20)
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Icon(
+                                imageVector = Icons.Filled.Search,
+                                contentDescription = "Search Destination",
+                                tint = DashColors.ACCENT,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                    }
                 }
-                // RIGHT 50%: street (centered) + volume (far right, 64dp box)
+                // RIGHT 50%: street display + volume button (white icon)
                 Row(
                     modifier = Modifier
                         .weight(0.5f)
                         .fillMaxHeight()
-                        .padding(start = 8.dp),
+                        .padding(start = 8.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Box(
-                        modifier = Modifier.weight(1f),
-                        contentAlignment = Alignment.Center
+                    DisplayBox(
+                        modifier = Modifier.weight(1f).fillMaxHeight()
                     ) {
                         Text(
                             text = if (currentStreetName.isNullOrBlank()) ""
@@ -979,7 +1011,7 @@ fun MapScreen(modifier: Modifier = Modifier) {
                                          else Icons.AutoMirrored.Filled.VolumeOff,
                             contentDescription = if (ttsEnabled) "Silenciar"
                                                 else "Activar voz",
-                            tint = DashColors.ACCENT,
+                            tint = DashColors.BUTTON_ICON,
                             modifier = Modifier.size(32.dp)
                         )
                     }
@@ -1584,5 +1616,30 @@ fun CustomKeyboard(
                 fontSize = 22
             )
         }
+    }
+}
+
+/**
+ * A "display" tile for a single data value, styled after a classic BMW
+ * instrument cluster: dark reddish background, accent-color text inside.
+ * Used to visually separate data readouts (hour, distance, street name, ...)
+ * from plain control buttons (cancel X, volume toggle) which stay black
+ * with white icons.
+ */
+@Composable
+fun DisplayBox(
+    modifier: Modifier = Modifier,
+    horizontalPadding: Int = 10,
+    verticalPadding: Int = 6,
+    cornerRadius: Int = 4,
+    content: @Composable () -> Unit
+) {
+    Box(
+        modifier = modifier
+            .background(DashColors.DISPLAY_BG, RoundedCornerShape(cornerRadius.dp))
+            .padding(horizontal = horizontalPadding.dp, vertical = verticalPadding.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        content()
     }
 }

@@ -28,8 +28,12 @@ El target físico es **Samsung Galaxy Tab A11 WiFi (SM-X133)** montada en el tor
 ## Invariantes (NO romper)
 
 - **Color de acento:** único, centralizado en `DashColors.ACCENT` (`#E60000`) y `DashColors.ACCENT_HEX`. Cambiar el color = 2 líneas. NUNCA inline otro color de acento.
-- **Tipografía:** `FontFamily.Monospace` en toda la UI (estética retro bitmap).
-- **Fondo:** `Color.Black` sólido. Sin transparencias en overlays principales.
+- **Fondo de "display" (datos):** `DashColors.DISPLAY_BG` (`#4A0000`) — exclusivamente usado dentro del composable `DisplayBox { ... }` que envuelve cada dato de la UI. No inline este color en otros lugares.
+- **Tint de "botón" (controles puros):** `DashColors.BUTTON_ICON` (`White`) — para los iconos de botones aislados (X cancelar, volumen). Los botones no tienen fondo propio (solo área clickable sobre negro).
+- **Regla de separación datos / controles:** un "dato" (hora, distancia, calle, instrucción) va en `DisplayBox` con texto accent. Un "control puro" es un icono con `tint = BUTTON_ICON` sin fondo. Un elemento "híbrido" (ej. "Destino" clickable) es un `DisplayBox` entero clickable con contenido en accent.
+- **Tipografía:** `FontFamily.Monospace` en toda la UI. Crear el `TextStyle` con `DashTextStyles.accent/gray/white(sizeSp)` y no inline color/weight/family.
+- **Fondo general de la UI:** `Color.Black` sólido. Los `DisplayBox` son la única excepción a esta regla.
+- **Street labels en el mapa:** blancos (`#FFFFFF`) con halo negro grueso (4.0f + blur 1.0f). NO usar el acento rojo en las etiquetas del mapa — el rojo queda reservado para la **línea de la ruta dibujada**.
 - **Orientación:** `landscape` fijo. La app nunca rota.
 - **Pantalla siempre encendida:** `FLAG_KEEP_SCREEN_ON` obligatorio.
 - **Immersive fullscreen:** status bar y nav bar ocultas. No agregar system bars.

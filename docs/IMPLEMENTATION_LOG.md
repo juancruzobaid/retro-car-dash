@@ -2,6 +2,41 @@
 
 > Entradas más recientes al principio. Cada entrega real suma una entrada con `Qué / Hecho / Pendiente / Refs`.
 
+## 2026-11-16 — Estética tipo tablero BMW: displays rojizos para datos, botones blancos para controles, labels blancos en el mapa
+
+**Qué:** Shift estético grande. Inspirado en el tablero clásico BMW (foto que mandó Juan): los datos viven en "displays" con fondo rojo oscuro y texto rojo-acento (`#E60000`), los controles son icono blanco sobre negro sin fondo propio. En el mapa, los nombres de calles pasan a BLANCO para que la paleta roja del overlay no compita con la información del mapa; el acento rojo queda reservado para la línea de la ruta y los datos de la UI.
+
+**Hecho:**
+- **DashColors amplía:**
+  - `DISPLAY_BG = Color(0xFF4A0000)` — fondo de los displays (rojizo oscuro, estilo instrument cluster BMW).
+  - `BUTTON_ICON = Color.White` — tint para iconos de botones (X cancelar, volumen).
+  - `ACCENT` queda igual, ahora usado para texto de displays y la flecha de maniobra.
+- **Nuevo composable `DisplayBox { content }`** — wrapper que aplica fondo rojizo + rounded corners 4dp + padding interno configurable. Centra su contenido. Puede recibir `.clickable {}` externamente cuando el display también funciona como botón (ej. "Destino").
+- **Mapa: street labels en blanco:**
+  - En `setStyle` block: `PropertyFactory.textColor(Color.parseColor("#FFFFFF"))` (antes `DashColors.ACCENT_HEX`). Mantiene halo negro grueso 4.0f + blur 1.0f para contraste.
+- **Bottom bar con ruta (96dp):**
+  - Izquierda: flecha de maniobra grande (sin fondo, tint ACCENT) + DisplayBox pequeño con "A {d}m" + DisplayBox grande con la instrucción (2 líneas, centered).
+  - Derecha superior: DisplayBox con "HH:mm · N min · X km" + botón X (icono blanco en 64dp clickable box, sin fondo).
+  - Derecha inferior: DisplayBox con "Por {calle}" + botón volumen (icono blanco).
+- **Bottom bar sin ruta (48dp):**
+  - Izquierda: DisplayBox clickable con "Destino" + lupa (lupa sigue en ACCENT porque el display entero es el "botón" visualmente).
+  - Derecha: DisplayBox con "Por {calle}" + botón volumen blanco.
+
+**Reglas de color aplicadas:**
+- "Dato" → DisplayBox (fondo rojizo) + texto `DashTextStyles.accent(size)` (rojo).
+- "Control puro" (X, 🔊) → sin fondo, `tint = BUTTON_ICON` (blanco).
+- "Control+dato híbrido" (Destino clickable) → DisplayBox + icono interno en ACCENT. El display en sí es el affordance clickable.
+- Flecha de maniobra → ACCENT sin fondo (es el "dato principal" que se mira primero; grande + rojo = alta jerarquía visual).
+
+**Pendiente:**
+- Probar en la tablet y ajustar `DISPLAY_BG` si el `#4A0000` se ve muy oscuro o muy visible en el panel cálido.
+- Evaluar si vale la pena dar más contraste al "A Xm" y al display de instrucción (padding/tamaños finos).
+- Teclado custom NO fue tocado — iteración separada si querés aplicarle la misma estética.
+
+**Refs:** commit `feat: BMW-inspired display aesthetic for bottom bar + white street labels`.
+
+---
+
 ## 2026-11-16 — Centralizar TextStyle en `DashTextStyles`
 
 **Qué:** Los `Text` de la UI repetían el mismo quinteto `color = ACCENT, fontSize = Xsp, fontWeight = Bold, fontFamily = Monospace` en 8 lugares distintos. Cambiar la tipografía global requería tocar cada call.
