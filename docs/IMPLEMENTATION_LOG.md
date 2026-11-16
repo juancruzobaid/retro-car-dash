@@ -2,6 +2,21 @@
 
 > Entradas más recientes al principio. Cada entrega real suma una entrada con `Qué / Hecho / Pendiente / Refs`.
 
+## 2026-11-16 — Teclado custom con estética BMW + icono de comando de voz
+
+**Qué:** El teclado custom adopta el mismo lenguaje visual del bottom bar (commit `09ecdac`): datos = display rojizo con texto acento, controles = icono blanco sobre negro. Además se reemplazan los emojis del mic y backspace por iconos vectoriales de Material.
+
+**Hecho:**
+- `KeyboardKey` ahora usa `DISPLAY_BG` + `DashTextStyles.accent(size)` (teclas = mini displays de dato). Se eliminan los params `backgroundColor` / `textColor`.
+- Nuevo `KeyboardIconKey` para teclas de control (mic + backspace): fondo negro + icono blanco (`BUTTON_ICON`).
+- Icono del mic: `Icons.AutoMirrored.Filled.RecordVoiceOver` reemplaza el emoji 🎙️. Es el estándar de Material para "voice command", mismo icono usado en botones del volante de autos modernos (silueta de perfil con ondas de voz saliendo de la boca).
+- Icono del backspace: `Icons.AutoMirrored.Filled.Backspace` reemplaza el emoji ⌫, por coherencia con el mic y con el resto de la UI (vector icons en lugar de emojis).
+- `ESPACIO` sigue como `KeyboardKey` (inserta un carácter, se lee como input de dato).
+
+**Pendiente:** Verificar build en Android Studio (no compilado por el agente; si `RecordVoiceOver`/`Backspace` no resuelven, revisar la dependencia `material-icons-extended`).
+
+**Refs:** commit `feat: teclado con estetica BMW y mic como RecordVoiceOver vector`.
+
 ## 2026-11-16 — Fix: Modifier.padding mezclaba `start` con `vertical`
 
 **Qué:** Error de compilación en `MainActivity.kt:984:26` ("None of the following candidates is applicable"). La llamada `.padding(start = 8.dp, vertical = 4.dp)` mezclaba `start` (solo existe en el overload de 4 args: start/top/end/bottom) con `vertical` (solo existe en el overload de 2 args: horizontal/vertical), y Compose lo rechaza.

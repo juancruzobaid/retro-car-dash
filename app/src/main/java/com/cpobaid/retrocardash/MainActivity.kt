@@ -26,6 +26,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Backspace
+import androidx.compose.material.icons.automirrored.filled.RecordVoiceOver
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Close
@@ -1532,23 +1534,42 @@ fun KeyboardKey(
     text: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    backgroundColor: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color(0xFF333333),
-    textColor: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color.White,
     fontSize: Int = 18
 ) {
     Box(
         modifier = modifier
             .height(48.dp)
-            .background(backgroundColor, RoundedCornerShape(6.dp))
+            .background(DashColors.DISPLAY_BG, RoundedCornerShape(6.dp))
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = text,
-            color = textColor,
-            fontSize = fontSize.sp,
-            fontFamily = FontFamily.Monospace,
-            fontWeight = FontWeight.Bold
+            style = DashTextStyles.accent(fontSize)
+        )
+    }
+}
+
+@Composable
+fun KeyboardIconKey(
+    icon: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    iconSize: Int = 28
+) {
+    Box(
+        modifier = modifier
+            .height(48.dp)
+            .background(androidx.compose.ui.graphics.Color.Black, RoundedCornerShape(6.dp))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = DashColors.BUTTON_ICON,
+            modifier = Modifier.size(iconSize.dp)
         )
     }
 }
@@ -1589,31 +1610,28 @@ fun CustomKeyboard(
                 }
             }
         }
-        // Bottom action row: mic, space (wide), backspace
+        // Bottom action row: mic (voice command, white icon) + ESPACIO (wide data key) + backspace (white icon)
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            KeyboardKey(
-                text = "🎙️",
+            KeyboardIconKey(
+                icon = Icons.AutoMirrored.Filled.RecordVoiceOver,
+                contentDescription = "Dictar por voz",
                 onClick = onMic,
-                modifier = Modifier.weight(1.5f),
-                backgroundColor = androidx.compose.ui.graphics.Color(0xFF555555),
-                fontSize = 20
+                modifier = Modifier.weight(1.5f)
             )
             KeyboardKey(
                 text = "ESPACIO",
                 onClick = onSpace,
                 modifier = Modifier.weight(7f),
-                backgroundColor = androidx.compose.ui.graphics.Color(0xFF555555),
                 fontSize = 14
             )
-            KeyboardKey(
-                text = "⌫",
+            KeyboardIconKey(
+                icon = Icons.AutoMirrored.Filled.Backspace,
+                contentDescription = "Borrar",
                 onClick = onBackspace,
-                modifier = Modifier.weight(1.5f),
-                backgroundColor = androidx.compose.ui.graphics.Color(0xFF555555),
-                fontSize = 22
+                modifier = Modifier.weight(1.5f)
             )
         }
     }
