@@ -2,6 +2,16 @@
 
 > Entradas más recientes al principio. Cada entrega real suma una entrada con `Qué / Hecho / Pendiente / Refs`.
 
+## 2026-11-16 — Fix: Modifier.padding mezclaba `start` con `vertical`
+
+**Qué:** Error de compilación en `MainActivity.kt:984:26` ("None of the following candidates is applicable"). La llamada `.padding(start = 8.dp, vertical = 4.dp)` mezclaba `start` (solo existe en el overload de 4 args: start/top/end/bottom) con `vertical` (solo existe en el overload de 2 args: horizontal/vertical), y Compose lo rechaza.
+
+**Hecho:**
+- Única ocurrencia, en el Row derecho (50%) de la rama sin ruta del bottom bar. Reemplazada por `.padding(start = 8.dp, top = 4.dp, bottom = 4.dp)` (padding equivalente con el overload de 4 args).
+- Verificado con `grep -nE "\.padding\(start = .*, vertical = "` → sin resultados.
+
+**Refs:** commit `fix: replace invalid padding(start=, vertical=) with padding(start=, top=, bottom=)`. Rompió en `09ecdac`.
+
 ## 2026-11-16 — Estética tipo tablero BMW: displays rojizos para datos, botones blancos para controles, labels blancos en el mapa
 
 **Qué:** Shift estético grande. Inspirado en el tablero clásico BMW (foto que mandó Juan): los datos viven en "displays" con fondo rojo oscuro y texto rojo-acento (`#E60000`), los controles son icono blanco sobre negro sin fondo propio. En el mapa, los nombres de calles pasan a BLANCO para que la paleta roja del overlay no compita con la información del mapa; el acento rojo queda reservado para la línea de la ruta y los datos de la UI.

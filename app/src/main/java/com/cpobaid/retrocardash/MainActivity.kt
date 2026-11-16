@@ -981,7 +981,7 @@ fun MapScreen(modifier: Modifier = Modifier) {
                     modifier = Modifier
                         .weight(0.5f)
                         .fillMaxHeight()
-                        .padding(start = 8.dp, vertical = 4.dp),
+                        .padding(start = 8.dp, top = 4.dp, bottom = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     DisplayBox(
