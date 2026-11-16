@@ -2,6 +2,24 @@
 
 > Entradas más recientes al principio. Cada entrega real suma una entrada con `Qué / Hecho / Pendiente / Refs`.
 
+## 2026-11-16 — Sliding window para búsqueda de closestShapeIdx
+
+**Qué:** El loop de "próxima maniobra" (cada 500 ms) recorría TODA la geometría de la ruta para encontrar el punto más cercano al usuario. En rutas largas (SF→Rosario tiene cientos de puntos, SF→BA miles) esto es trabajo redundante porque el usuario normalmente avanza linealmente.
+
+**Hecho:**
+- Nuevo state `lastClosestShapeIdx: Int` (mutableIntStateOf) que persiste el índice encontrado la vez anterior.
+- El loop ahora busca primero en una ventana `[max(0, last-5), min(size-1, last+50)]`: 5 puntos hacia atrás (por si el fix GPS retrocedió un poco) y 50 adelante (cubre varios cientos de metros de ruta en avance normal).
+- Si la distancia mínima en la ventana es > 100 m, se asume que el usuario se desvió de la ruta o está en un reroute y cae a búsqueda completa como fallback.
+- El state se resetea a 0 en los dos puntos donde la ruta cambia: al setear una ruta nueva (en el handler del search result) y al cancelar la ruta activa (en el botón X).
+
+**Impacto esperado:** en navegación normal, la búsqueda baja de O(n) a O(55) por tick, independiente del largo de la ruta. En rutas largas de ~1000+ puntos es 20× más rápido. Comportamiento visible = idéntico.
+
+**Pendiente:** C, D, E.
+
+**Refs:** commit `perf: sliding window for closestShapeIdx lookup`.
+
+---
+
 ## 2026-11-16 — Remover `ColorCalibrationScreen` muerto
 
 **Qué:** Borrado del composable `ColorCalibrationScreen` que no se usa desde que decidimos el color final (`#E60000`). Ocupaba 45 líneas al principio del archivo y confundía al lector.

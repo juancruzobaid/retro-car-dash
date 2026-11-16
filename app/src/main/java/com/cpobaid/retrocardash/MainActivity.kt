@@ -204,6 +204,9 @@ fun MapScreen(modifier: Modifier = Modifier) {
     // Thread-safe: UI thread may .clear() it while a LaunchedEffect adds to it
     val spokenManeuvers = remember { java.util.Collections.synchronizedSet(mutableSetOf<String>()) }
     val tts = remember { mutableStateOf<TextToSpeech?>(null) }
+    // Hint to the next-maneuver loop: start searching the route shape around this index.
+    // Reset to 0 when a new route is set or cancelled.
+    var lastClosestShapeIdx by remember { mutableIntStateOf(0) }
 
     var isSearching by remember { mutableStateOf(false) }
     var showSearchSheet by remember { mutableStateOf(false) }
@@ -416,9 +419,18 @@ fun MapScreen(modifier: Modifier = Modifier) {
                 ) {
                     val location = map.locationComponent.lastKnownLocation
                     if (location != null) {
-                        var closestShapeIdx = 0
+                        // Sliding window: start around last known closest idx to avoid
+                        // scanning the whole route every 500 ms. If the window's best
+                        // distance is suspiciously large (user off-route or re-route),
+                        // fall back to a full scan.
+                        val geomSize = routeGeometry.size
+                        val windowStart = (lastClosestShapeIdx - 5).coerceAtLeast(0)
+                        val windowEnd = (lastClosestShapeIdx + 50).coerceAtMost(geomSize - 1)
+
+                        var closestShapeIdx = windowStart
                         var closestDist = Double.MAX_VALUE
-                        routeGeometry.forEachIndexed { idx, point ->
+                        for (idx in windowStart..windowEnd) {
+                            val point = routeGeometry[idx]
                             val d = haversineMeters(
                                 location.latitude, location.longitude,
                                 point.latitude, point.longitude
@@ -428,6 +440,24 @@ fun MapScreen(modifier: Modifier = Modifier) {
                                 closestShapeIdx = idx
                             }
                         }
+
+                        // Fallback to full scan if the user is far from the window
+                        // (e.g. just set a new route, or wandered off the shape).
+                        if (closestDist > 100.0) {
+                            closestShapeIdx = 0
+                            closestDist = Double.MAX_VALUE
+                            routeGeometry.forEachIndexed { idx, point ->
+                                val d = haversineMeters(
+                                    location.latitude, location.longitude,
+                                    point.latitude, point.longitude
+                                )
+                                if (d < closestDist) {
+                                    closestDist = d
+                                    closestShapeIdx = idx
+                                }
+                            }
+                        }
+                        lastClosestShapeIdx = closestShapeIdx
 
                         val upcomingIdx = routeManeuvers.indexOfFirst { m ->
                             m.beginShapeIndex > closestShapeIdx &&
@@ -775,7 +805,8 @@ fun MapScreen(modifier: Modifier = Modifier) {
                                     nextManeuverDistance = 0
                                     // Clear so a re-navigated route with the same instruction text speaks again
                                     spokenManeuvers.clear()
-                                    spokenManeuvers.clear()
+                                    // Reset the sliding-window hint for the next maneuver loop
+                                    lastClosestShapeIdx = 0
                                 },
                             contentAlignment = Alignment.Center
                         ) {
@@ -1003,6 +1034,8 @@ fun MapScreen(modifier: Modifier = Modifier) {
                                                             nextManeuverIndex = 0
                                                             nextManeuverDistance = 0
                                                             spokenManeuvers.clear()
+                                                            // Reset the sliding-window hint for the new route
+                                                            lastClosestShapeIdx = 0
 
                                                             isChaseView = true
                                                             mapLibreMapInstance?.let { m ->
