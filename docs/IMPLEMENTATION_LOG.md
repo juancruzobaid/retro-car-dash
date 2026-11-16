@@ -2,6 +2,33 @@
 
 > Entradas más recientes al principio. Cada entrega real suma una entrada con `Qué / Hecho / Pendiente / Refs`.
 
+## 2026-11-16 — Centralizar TextStyle en `DashTextStyles`
+
+**Qué:** Los `Text` de la UI repetían el mismo quinteto `color = ACCENT, fontSize = Xsp, fontWeight = Bold, fontFamily = Monospace` en 8 lugares distintos. Cambiar la tipografía global requería tocar cada call.
+
+**Hecho:**
+- Nuevo `object DashTextStyles` con 3 fábricas:
+  - `accent(sizeSp: Int): TextStyle` — rojo acento + bold + mono (el "primary" de la app)
+  - `gray(sizeSp: Int): TextStyle` — gris + mono, para textos secundarios tipo status
+  - `white(sizeSp: Int): TextStyle` — blanco + mono, para contenido neutral (search results, input placeholder)
+- Un `BASE_MONO = TextStyle(fontFamily = FontFamily.Monospace)` interno + `.copy()` para no repetir el fontFamily en cada factory.
+- Migrados los 8 `Text`:
+  - "A {d}m" bajo el icono de maniobra → `accent(13)`
+  - Instrucción de maniobra (2 líneas) → `accent(20).copy(lineHeight = 26.sp)` + `maxLines = 2`
+  - "HH:mm · N min · X km" → `accent(16)` + `textAlign Center`
+  - "Por {calle}" en bar con ruta y sin ruta → `accent(18)`
+  - "Destino" (sin ruta) → `accent(20)`
+  - Input display del teclado → `gray(18)` si blank, `white(18)` si tiene texto
+  - Status del search → `gray(12)`
+  - Rows del search result list → `white(14)`
+- `KeyboardKey` NO migrado: su `fontSize`/`color` son parámetros del composable (por diseño) y la fábrica no encaja.
+
+**Impacto:** cambiar fuente global = 1 línea. Textos consistentes por regla no por disciplina. Comportamiento idéntico (los pixels se renderizan igual).
+
+**Refs:** commit `refactor: centralize TextStyle in DashTextStyles object`.
+
+---
+
 ## 2026-11-16 — Backoff exponencial en el loop de reverse geocode
 
 **Qué:** Si la conexión a Nominatim está rota (sin internet, servidor caído, timeout), el loop reintentaba cada 3 s indefinidamente. Esto consume batería (coroutine activa, request, parse) y es poco respetuoso con el servicio cuando el fallo se prolonga.

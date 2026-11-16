@@ -43,6 +43,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -95,6 +96,34 @@ import java.util.Locale
 object DashColors {
     val ACCENT = androidx.compose.ui.graphics.Color(0xFFE60000)
     const val ACCENT_HEX = "#E60000"
+}
+
+/**
+ * Centralized Compose TextStyle factories for the dashboard.
+ * All text is monospace (retro bitmap aesthetic). Three families:
+ *   - accent: DashColors.ACCENT, bold — primary UI text (speed, ETA, instructions...)
+ *   - gray:   gray, normal         — status/subtle text (search status message)
+ *   - white:  white, normal        — neutral text (search result rows, input placeholder)
+ * Pass `.copy(...)` when you need to tweak a one-off property on top.
+ */
+object DashTextStyles {
+    private val BASE_MONO = TextStyle(fontFamily = FontFamily.Monospace)
+
+    fun accent(sizeSp: Int): TextStyle = BASE_MONO.copy(
+        color = DashColors.ACCENT,
+        fontSize = sizeSp.sp,
+        fontWeight = FontWeight.Bold
+    )
+
+    fun gray(sizeSp: Int): TextStyle = BASE_MONO.copy(
+        color = androidx.compose.ui.graphics.Color.Gray,
+        fontSize = sizeSp.sp
+    )
+
+    fun white(sizeSp: Int): TextStyle = BASE_MONO.copy(
+        color = androidx.compose.ui.graphics.Color.White,
+        fontSize = sizeSp.sp
+    )
 }
 
 // Valhalla maneuver type constants.
@@ -771,10 +800,7 @@ fun MapScreen(modifier: Modifier = Modifier) {
                         )
                         Text(
                             text = "A ${nextManeuverDistance}m",
-                            color = DashColors.ACCENT,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace,
+                            style = DashTextStyles.accent(13),
                             modifier = Modifier.weight(0.25f).wrapContentHeight()
                         )
                     }
@@ -785,13 +811,9 @@ fun MapScreen(modifier: Modifier = Modifier) {
                     ) {
                         Text(
                             text = maneuver.instruction.trimEnd('.', ' '),
-                            color = DashColors.ACCENT,
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace,
+                            style = DashTextStyles.accent(20).copy(lineHeight = 26.sp),
                             maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                            lineHeight = 26.sp
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
@@ -816,10 +838,7 @@ fun MapScreen(modifier: Modifier = Modifier) {
                         ).format(Date(arrivalTimeMillis))
                         Text(
                             text = "$arrivalTimeStr · $routeDuration min · ${String.format(Locale.getDefault(), "%.1f", routeDistance)} km",
-                            color = DashColors.ACCENT,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace,
+                            style = DashTextStyles.accent(16),
                             textAlign = TextAlign.Center,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -862,10 +881,7 @@ fun MapScreen(modifier: Modifier = Modifier) {
                         Text(
                             text = if (currentStreetName.isNullOrBlank()) ""
                                    else "Por $currentStreetName",
-                            color = DashColors.ACCENT,
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace,
+                            style = DashTextStyles.accent(18),
                             textAlign = TextAlign.Center,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -917,10 +933,7 @@ fun MapScreen(modifier: Modifier = Modifier) {
                 ) {
                     Text(
                         text = "Destino",
-                        color = DashColors.ACCENT,
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace
+                        style = DashTextStyles.accent(20)
                     )
                     Spacer(modifier = Modifier.width(12.dp))
                     Icon(
@@ -945,10 +958,7 @@ fun MapScreen(modifier: Modifier = Modifier) {
                         Text(
                             text = if (currentStreetName.isNullOrBlank()) ""
                                    else "Por $currentStreetName",
-                            color = DashColors.ACCENT,
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace,
+                            style = DashTextStyles.accent(18),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -1003,12 +1013,10 @@ fun MapScreen(modifier: Modifier = Modifier) {
                     ) {
                         Text(
                             text = if (searchQuery.isBlank()) "Buscar destino..." else searchQuery,
-                            color = if (searchQuery.isBlank())
-                                androidx.compose.ui.graphics.Color.Gray
+                            style = if (searchQuery.isBlank())
+                                DashTextStyles.gray(18)
                             else
-                                androidx.compose.ui.graphics.Color.White,
-                            fontSize = 18.sp,
-                            fontFamily = FontFamily.Monospace
+                                DashTextStyles.white(18)
                         )
                     }
 
@@ -1017,9 +1025,7 @@ fun MapScreen(modifier: Modifier = Modifier) {
                     // Status text
                     Text(
                         text = searchStatus,
-                        fontSize = 12.sp,
-                        color = androidx.compose.ui.graphics.Color.Gray,
-                        fontFamily = FontFamily.Monospace,
+                        style = DashTextStyles.gray(12),
                         modifier = Modifier.padding(vertical = 2.dp)
                     )
 
@@ -1083,9 +1089,7 @@ fun MapScreen(modifier: Modifier = Modifier) {
                                 ) {
                                     Text(
                                         text = result.displayName,
-                                        color = androidx.compose.ui.graphics.Color.White,
-                                        fontSize = 14.sp,
-                                        fontFamily = FontFamily.Monospace
+                                        style = DashTextStyles.white(14)
                                     )
                                     HorizontalDivider(
                                         color = androidx.compose.ui.graphics.Color.DarkGray,
