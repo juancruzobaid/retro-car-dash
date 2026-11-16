@@ -504,17 +504,32 @@ fun MapScreen(modifier: Modifier = Modifier) {
         map.setPadding(p[0], p[1], p[2], p[3])
     }
 
-    // Reverse geocode current street every 3 seconds
+    // Reverse geocode current street every 3 seconds.
+    // Skip the network call if the user hasn't moved more than 30m since the
+    // last successful geocode (parked, slow traffic, etc.) — the street name
+    // can't have changed, so we save Nominatim requests.
     LaunchedEffect(mapLibreMapInstance) {
         val map = mapLibreMapInstance
         if (map != null) {
+            var lastGeoLat = Double.NaN
+            var lastGeoLon = Double.NaN
             while (true) {
                 try {
                     if (map.locationComponent.isLocationComponentActivated) {
                         val location = map.locationComponent.lastKnownLocation
                         if (location != null) {
-                            val street = fetchCurrentStreet(location.latitude, location.longitude)
-                            currentStreetName = street
+                            val movedEnough = lastGeoLat.isNaN() || haversineMeters(
+                                lastGeoLat, lastGeoLon,
+                                location.latitude, location.longitude
+                            ) > 30.0
+                            if (movedEnough) {
+                                val street = fetchCurrentStreet(location.latitude, location.longitude)
+                                if (street != null) {
+                                    currentStreetName = street
+                                    lastGeoLat = location.latitude
+                                    lastGeoLon = location.longitude
+                                }
+                            }
                         }
                     }
                 } catch (e: Exception) {

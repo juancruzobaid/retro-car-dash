@@ -2,6 +2,24 @@
 
 > Entradas más recientes al principio. Cada entrega real suma una entrada con `Qué / Hecho / Pendiente / Refs`.
 
+## 2026-11-16 — Skip reverse geocode cuando la posición no cambió significativamente
+
+**Qué:** El loop de reverse geocode (Nominatim) corría cada 3 s incondicionalmente, incluso con el auto parado (semáforos, tráfico lento, estacionado). Nominatim tiene una política de uso razonable (<1 req/s por usuario) y además es trabajo desperdiciado porque el nombre de la calle no cambia si no te moviste.
+
+**Hecho:**
+- Variables locales `lastGeoLat`, `lastGeoLon` dentro del `LaunchedEffect` (se descartan si la Composition se desmonta).
+- Antes de llamar `fetchCurrentStreet`, se calcula `haversineMeters(lastGeoLat, lastGeoLon, currentLat, currentLon)` y solo se llama si > 30 m.
+- Cuando el geocode responde con éxito (`street != null`), se actualizan `lastGeoLat`/`lastGeoLon` como "última posición geocodeada".
+- Inicio: `Double.NaN` como marcador de "nunca geocodeado todavía" — primera iteración siempre dispara.
+
+**Impacto esperado:** con el auto parado, ~0 requests a Nominatim en lugar de 20/minuto. Con auto en movimiento lento (<10 m/s), request cada ~3-6 segundos efectivos. Con auto rápido, cada 3 s como antes. Mejora especialmente la vida de la data móvil y el respeto a los términos de Nominatim.
+
+**Pendiente:** D, E.
+
+**Refs:** commit `perf: skip reverse geocode when user hasn't moved 30m+`.
+
+---
+
 ## 2026-11-16 — Sliding window para búsqueda de closestShapeIdx
 
 **Qué:** El loop de "próxima maniobra" (cada 500 ms) recorría TODA la geometría de la ruta para encontrar el punto más cercano al usuario. En rutas largas (SF→Rosario tiene cientos de puntos, SF→BA miles) esto es trabajo redundante porque el usuario normalmente avanza linealmente.
